@@ -83,29 +83,27 @@ const DECK = 6.8, SLOPE = 0.06;
     r.pts.forEach(([x, z], i) => { if (Number.isInteger(x) && Number.isInteger(z)) { const k = vkey(x, z); let a = atV.get(k); if (!a) atV.set(k, a = []); a.push(ri, i); } });
     const a = vkey(...r.pts[0]), b = vkey(...r.pts.at(-1)); byEnds.set(a + ':' + b, ri); byEnds.set(b + ':' + a, ri);
   });
-  const heap = []; // max-heap of [h, ri, i, dx, dz] (dx,dz = direction the ramp is running, away from the bridge)
+  const heap = []; // max-heap of [h, ri, i]
   const push = e => { heap.push(e); let i = heap.length - 1; while (i) { const p = (i - 1) >> 1; if (heap[p][0] >= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
   const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] > heap[m][0]) m = l; if (r < heap.length && heap[r][0] > heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
-  const raise = (ri, i, h, dx = 0, dz = 0) => { const r = roads[ri]; if (!r.y) r.y = new Float32Array(r.pts.length); if (h > r.y[i] + 0.01) { r.y[i] = h; push([h, ri, i, dx, dz]); } };
-  const ahead = (dx, dz, ex, ez) => { const l = Math.hypot(ex, ez) || 1; return !dx && !dz || (dx * ex + dz * ez) / l > 0.76; }; // within ~40 deg
+  const raise = (ri, i, h) => { const r = roads[ri]; if (!r.y) r.y = new Float32Array(r.pts.length); if (h > r.y[i] + 0.01) { r.y[i] = h; push([h, ri, i]); } };
   for (const [layer, over, x0, z0, x1, z1] of (window.BRIDGES || [])) {
     const ri = byEnds.get(vkey(x0, z0) + ':' + vkey(x1, z1)); if (ri === undefined) continue;
-    const r = roads[ri], h = over ? DECK * Math.min(layer, 2) : 0.7, n = r.pts.length; r.bridge = h;
-    const out = (i, j) => { const ex = r.pts[i][0] - r.pts[j][0], ez = r.pts[i][1] - r.pts[j][1], l = Math.hypot(ex, ez) || 1; return [ex / l, ez / l]; };
-    r.pts.forEach((_, i) => raise(ri, i, h, ...(i === 0 ? out(0, 1) : i === n - 1 ? out(n - 1, n - 2) : [0, 0])));
+    const r = roads[ri], h = over ? DECK * Math.min(layer, 2) : 0.7; r.bridge = h;
+    r.pts.forEach((_, i) => raise(ri, i, h));
   }
-  // the ramp only runs on along the road that carries straight on from the bridge, not into every side street
+  // a ramp climbs every road that meets the bridge or its ramp (slip roads, the street carrying on), at 6 %, so no
+  // road ever ends against a step; roads that only cross underneath share no node and stay down
   while (heap.length) {
-    const [h, ri, i, dx, dz] = pop(), r = roads[ri]; if (h < r.y[i] - 0.01) continue;
-    const [x, z] = r.pts[i];
-    for (const j of [i - 1, i + 1]) if (j >= 0 && j < r.pts.length) { const ex = r.pts[j][0] - x, ez = r.pts[j][1] - z, l = Math.hypot(ex, ez) || 1;
-      if (r.bridge || ahead(dx, dz, ex, ez)) raise(ri, j, h - SLOPE * Math.abs(r.cum[j] - r.cum[i]), ex / l, ez / l); }
-    if ((dx || dz) && Number.isInteger(x) && Number.isInteger(z)) { const o = atV.get(vkey(x, z));
-      for (let k = 0; k < o.length; k += 2) { if (o[k] === ri) continue; const q = roads[o[k]], kk = o[k + 1];
-        for (const j of [kk - 1, kk + 1]) if (j >= 0 && j < q.pts.length) { const ex = q.pts[j][0] - x, ez = q.pts[j][1] - z, l = Math.hypot(ex, ez) || 1;
-          if (ahead(dx, dz, ex, ez)) raise(o[k], j, h - SLOPE * Math.abs(q.cum[j] - q.cum[kk]), ex / l, ez / l); }
-        if (q.y && q.y[kk] < h) q.y[kk] = Math.max(q.y[kk], h - 0.01); } }
+    const [h, ri, i] = pop(), r = roads[ri]; if (h < r.y[i] - 0.01) continue;
+    for (const j of [i - 1, i + 1]) if (j >= 0 && j < r.pts.length) raise(ri, j, h - SLOPE * Math.abs(r.cum[j] - r.cum[i]));
+    const [x, z] = r.pts[i]; if (Number.isInteger(x) && Number.isInteger(z)) { const o = atV.get(vkey(x, z)); for (let k = 0; k < o.length; k += 2) if (o[k] !== ri) raise(o[k], o[k + 1], h); }
   }
+  // a dead-end street hanging off a ramp comes back down to the ground at its far end
+  roads.forEach(r => { if (!r.y || r.bridge) return; for (const e of [0, r.pts.length - 1]) { const [x, z] = r.pts[e];
+    if (r.y[e] <= 0.05 || !Number.isInteger(x) || !Number.isInteger(z) || atV.get(vkey(x, z)).length >= 4) continue;
+    if (Math.max(...r.y) <= SLOPE * r.len) r.y.forEach((v, i) => { r.y[i] = Math.min(v, SLOPE * Math.abs(r.cum[i] - r.cum[e])); });
+    else (r.stub ||= []).push(e); } }); // too short to come down: a stub ending in a barrier
   roads.forEach(r => { if (r.y && !r.y.some(v => v > 0.05)) r.y = null; });
   // where other roads join a motorway (slip roads), so the guard rail can leave the gap
   roads.forEach((r, ri) => { if (r.t !== 0) return; r.jcum = []; r.pts.forEach(([x, z], i) => { const o = Number.isInteger(x) && Number.isInteger(z) && atV.get(vkey(x, z)); if (o && o.length > 2) r.jcum.push(r.cum[i]); }); });
@@ -135,10 +133,10 @@ function roadOverlap(x, z, margin = 0.4) {
   for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
     const s = segGrid.get(ckey(gx + a, gz + b)); if (!s) continue;
     for (let j = 0; j < s.length; j += 2) {
-      const r = roads[s[j]], i = s[j + 1]; if (r.t > 8) continue;
+      const r = roads[s[j]], i = s[j + 1]; if (r.t === 9) continue; // tracks are sand, anything may stand there
       const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
       const t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1), qx = ax + dx * t, qz = az + dz * t, d = Math.hypot(x - qx, z - qz);
-      const band = r.w / 2 + Math.max(0.3, r.side) + margin, o = band - d;
+      const band = Math.max(r.w / 2 + 0.6, r.w / 2 + Math.max(0.3, r.side) + margin), o = band - d; // never on the carriageway itself
       if (o > worst) { worst = o; const k = d > 1e-3 ? 1 / d : 0; px = (x - qx) * k; pz = (z - qz) * k; if (!k) { const l = Math.sqrt(L2); px = -dz / l; pz = dx / l; } }
     }
   }
@@ -670,6 +668,10 @@ function bridgeSeg(BR, cols, r, i, y) {
   prism(BR, ax, az, bx, bz, 0, hw, ya - 0.03, yb - 0.03, bot(ya), bot(yb), 0xc9c3b8);
   for (const s of [1, -1]) prism(BR, ax, az, bx, bz, s * (hw - 0.17), 0.17, ya + 0.85, yb + 0.85, ya - 0.05, yb - 0.05, 0xe2ddd3);
   const L = r.cum[i + 1] - r.cum[i], ux = (bx - ax) / (L || 1), uz = (bz - az) / (L || 1);
+  for (const e of r.stub || []) if (e === i || e === i + 1) { const [ex, ez] = r.pts[e], h = y + r.y[e]; // butée en bout d'impasse
+    prism(BR, ex - ux * 0.2, ez - uz * 0.2, ex + ux * 0.2, ez + uz * 0.2, 0, hw, h + 0.9, h + 0.9, bot(h), bot(h), 0xe2ddd3);
+    const p = [[ex - uz * hw - ux * 0.3, ez + ux * hw - uz * 0.3], [ex + uz * hw - ux * 0.3, ez - ux * hw - uz * 0.3], [ex + uz * hw + ux * 0.3, ez - ux * hw + uz * 0.3], [ex - uz * hw + ux * 0.3, ez + ux * hw + uz * 0.3]];
+    cols.push({ pts: p, minx: Math.min(...p.map(q => q[0])), maxx: Math.max(...p.map(q => q[0])), minz: Math.min(...p.map(q => q[1])), maxz: Math.max(...p.map(q => q[1])) }); }
   for (let d = (30 - (r.cum[i] % 30)) % 30; d < L; d += 30) {
     const h = ya + (yb - ya) * d / L; if (h < 4) continue;
     const x = ax + ux * d, z = az + uz * d, top = h - 1.15, pw = Math.min(r.w * 0.45, 4);
@@ -1032,7 +1034,8 @@ function buildChunk(gx, gz) {
         const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az), h = Math.atan2(bx - ax, bz - az), cs = Math.cos(h), sn = Math.sin(h);
         for (let d = rand(3, 9); d < L - 3; d += rand(7, 16)) {
           const sd = Math.random() < 0.5 ? 1 : -1, x = ax + (bx - ax) * d / L, z = az + (bz - az) * d / L;
-          if (r.t >= 4 && city && Math.random() < 0.35) { const o = r.w / 2 - 1.1; parked.push([x - cs * o * sd, z + sn * o * sd, h + (Math.random() < 0.5 ? 0 : Math.PI)]); }
+          const atEnd = r.cum[i] + d < 14 || r.cum[i] + d > r.len - 14;
+          if (r.t >= 4 && city && !atEnd && !r.y && Math.random() < 0.35) { const o = r.w / 2 + 0.25; const q = [x - cs * o * sd, z + sn * o * sd]; if (!cols.some(c => q[0] > c.minx - 1.2 && q[0] < c.maxx + 1.2 && q[1] > c.minz - 1.2 && q[1] < c.maxz + 1.2)) parked.push([q[0], q[1], h + (Math.random() < 0.5 ? 0 : Math.PI)]); }
           else if (r.t <= 4 && city && Math.random() < 0.12) { const o = r.w / 2 + Math.max(1.5, r.side * 0.75); stalls.push([x - cs * o * sd, z + sn * o * sd, h]); }
           else if (Math.random() < 0.05) { const o = r.w / 2 + 0.8; piles.push([x - cs * o * sd, z + sn * o * sd]); }
         }
@@ -1167,7 +1170,7 @@ const CAR_CFG = {
   taxisn:     { len: 4.3, w: 1.75, flip: true, label: 'Taxi', vmax: 50 },
   clando:     { len: 4.4, w: 1.8, label: 'Clando', vmax: 45 },
   tricycle:   { len: 3.0, w: 1.3, label: 'Tricycle', vmax: 18 },
-  mercedes:   { len: 4.5, w: 1.72, label: 'Mercedes 190E', vmax: 55 },
+  mercedes:   { len: 4.5, w: 1.72, h: 1.39, label: 'Mercedes 190E', vmax: 55 },
   civic:      { len: 4.1, w: 1.8, label: 'Honda Civic', vmax: 55 },
 };
 const PROP_CFG = { kiosque_om: { len: 2.6 }, cafe: { len: 2.4 }, fruitcart: { len: 2.4 }, maison: { len: 13 }, maisonbasket: { len: 18 } };
@@ -1195,8 +1198,9 @@ function normalize(root, cfg) {
   const s2 = b2.getSize(new THREE.Vector3()), c = b2.getCenter(new THREE.Vector3()), sc = cfg.len / Math.max(s2.x, s2.z);
   // some models are far too wide for their length (open doors, mirrors, bad export): squeeze width to the real vehicle
   const sx = cfg.w && s2.x * sc > cfg.w ? cfg.w / s2.x : sc;
-  for (const m of meshes) { m.geometry.translate(-c.x, -b2.min.y, -c.z); m.geometry.scale(sx, sc, sc); out.add(m); if (cfg.body && cfg.body.test(m.material.name || '')) m.userData.body = true; }
-  out.userData.size = new THREE.Vector3(s2.x * sx, s2.y * sc, s2.z * sc);
+  const sy = cfg.h ? cfg.h / s2.y : sc; // a few models are too tall for the real car (roof rack, bad export)
+  for (const m of meshes) { m.geometry.translate(-c.x, -b2.min.y, -c.z); m.geometry.scale(sx, sy, sc); out.add(m); if (cfg.body && cfg.body.test(m.material.name || '')) m.userData.body = true; }
+  out.userData.size = new THREE.Vector3(s2.x * sx, s2.y * sy, s2.z * sc);
   return out;
 }
 function makeCar(name, color) {
@@ -1266,7 +1270,7 @@ function setPlayerCar(name) {
 }
 function spawnAt(x, z) {
   const nr = nearestRoad(x, z, 3, r => r.t <= 6) || nearestRoad(x, z, 6);
-  if (nr) { x = nr.x; z = nr.z; player.h = nr.h; }
+  if (nr) { const ln = laneFor(nr.r); x = nr.x - Math.cos(nr.h) * ln; z = nr.z + Math.sin(nr.h) * ln; player.h = nr.h; } // right-hand lane
   player.x = x; player.z = z; player.vx = player.vz = 0; player.hp = 100;
   player.y = nr && nr.r.y ? segLift(nr.r, nr.i, nr.t) + 0.16 : undefined; player.deck = null;
   camPos.set(x - Math.sin(player.h) * 10, 5, z - Math.cos(player.h) * 10);
@@ -1331,6 +1335,12 @@ function setLOD(mesh, far) {
   for (const ch of mesh.children) ch.visible = ch === mesh.userData.proxy ? far : (!far || !!ch.userData.isBar);
 }
 function removeCar(c) { c.mesh.visible = false; (pools[c.mesh.userData.model] ||= []).push(c.mesh); }
+// lateral offset of a lane, right-hand traffic: one-way roads (incl. each carriageway of a divided avenue) use
+// their right lanes, two-way roads the right half; lanes ~3.4 m wide
+function laneFor(r) {
+  const half = r.ow ? r.w / 2 : r.w / 4 * 2, n = Math.max(1, Math.round((r.ow ? r.w : r.w / 2) / 3.4)), k = (Math.random() * Math.ceil(n / 2)) | 0;
+  return r.ow ? (n === 1 ? 0 : half - (k + 0.5) * r.w / n) : half - (k + 0.5) * half / n;
+}
 function spawnTraffic() {
   const target = Math.round(Q.traffic * (rushHour() ? 1.8 : 1)); if (traffic.length >= target) return;
   for (let tries = 0; tries < 6 && traffic.length < target; tries++) {
@@ -1341,7 +1351,7 @@ function spawnTraffic() {
     const name = weighted(outsideDakar(x) ? TRAFFIC_MIX_TOWN : TRAFFIC_MIX_DAKAR);
     const mesh = takeCar(name);
     const s = r.cum[nr.i] + nr.t * (r.cum[nr.i + 1] - r.cum[nr.i]);
-    const c = { mesh, r, s, dir, speed: 0, x: nr.x, z: nr.z, h: 0, stun: 0, lane: r.ow ? (r.w > 8 ? rand(-1.5, 1.5) : 0) : r.w / 4, police: name === 'police', honk: 0 };
+    const c = { mesh, r, s, dir, speed: 0, x: nr.x, z: nr.z, h: 0, stun: 0, lane: 0, laneT: laneFor(r), police: name === 'police', honk: 0 };
     traffic.push(c);
   }
 }
@@ -1355,7 +1365,7 @@ function nextRoad(c) {
   const cand = (ends.get(endKey(p[0], p[1])) || []).filter(([ri, e]) => roads[ri] !== c.r && roads[ri].t <= 8 && !(roads[ri].ow && e === 1));
   if (!cand.length) { if (c.r.ow) return false; c.dir = -c.dir; return true; }
   const [ri, e] = pick(cand); c.r = roads[ri]; c.dir = e === 0 ? 1 : -1; c.s = e === 0 ? 0 : c.r.len;
-  c.lane = c.r.ow ? 0 : c.r.w / 4; return true;
+  c.laneT = laneFor(c.r); return true;
 }
 function updateTraffic(dt) {
   for (let ci = traffic.length - 1; ci >= 0; ci--) {
@@ -1386,7 +1396,8 @@ function updateTraffic(dt) {
     if (c.s > c.r.len || c.s < 0) { if (!nextRoad(c)) { removeCar(c); traffic.splice(ci, 1); continue; } }
     const [x, z, hh, ly] = roadPoint(c.r, c.s), h = c.dir > 0 ? hh : hh + Math.PI;
     c.h += angDiff(c.h, h) * Math.min(1, dt * 6);
-    c.x = x + Math.cos(h) * -c.lane * -1 * (c.r.ow ? 1 : 1) * 0 + (-Math.cos(h)) * c.lane; c.z = z + Math.sin(h) * c.lane; c.y = ly > 0.05 ? ly + 0.16 : 0;
+    c.lane += ((c.laneT ?? c.lane) - c.lane) * Math.min(1, dt * 1.5); // glide into the lane instead of jumping at junctions
+    c.x = x - Math.cos(h) * c.lane; c.z = z + Math.sin(h) * c.lane; c.y = ly > 0.05 ? ly + 0.16 : 0;
     c.mesh.position.set(c.x, c.y, c.z); c.mesh.rotation.y = c.h;
     setLOD(c.mesh, d > (qIdx ? 110 : 60));
   }
