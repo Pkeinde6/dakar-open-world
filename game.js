@@ -434,9 +434,10 @@ const stallMat = new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 1 
 const parasolMat = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide });
 const sandPileMat = new THREE.MeshStandardMaterial({ color: 0xc7a473, roughness: 1, flatShading: true });
 const roadMat = new THREE.MeshStandardMaterial({ map: asphaltTex, vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+const dirtRoadMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide }); // rues en sable tasse
 const sideMat = new THREE.MeshStandardMaterial({ map: asphaltTex, vertexColors: true, roughness: 0.9, side: THREE.DoubleSide });
 // the scanned asphalt is a dark fresh tarmac; Dakar roads are sun-bleached and dusty, so the albedo is lifted (linear > 1)
-pbr(roadMat, 'worn_asphalt', { tint: new THREE.Color(4.2, 4.0, 3.9) }); pbr(sideMat, 'interlocking_concrete_pavers', { tint: new THREE.Color(2.2, 2.1, 2.0), repeat: 3 });
+pbr(roadMat, 'worn_asphalt', { tint: new THREE.Color(2.7, 2.75, 2.95) }); // grey like the Street View tarmac, not brown pbr(dirtRoadMat, 'sand_02', { normal: 0.8, tint: new THREE.Color(1.35, 1.3, 1.25) }); pbr(sideMat, 'interlocking_concrete_pavers', { tint: new THREE.Color(2.2, 2.1, 2.0), repeat: 3 });
 pbr(shopMat, 'painted_metal_shutter', { diff: false, rough: false, normal: 0.4 });
 // sand drift texture: u = across (0 at the curb, 1 toward the lane), v = along the road; ragged inner edge
 const sandEdgeTex = canvasTex(128, 256, (g, w, h) => {
@@ -460,10 +461,10 @@ float bh(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
 float bn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(bh(i),bh(i+vec2(1,0)),f.x),mix(bh(i+vec2(0,1)),bh(i+vec2(1,1)),f.x),f.y);}
 ` + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
     float along = vWP.x + vWP.z;
-    if (vUp > .5) { // toit : beton gris-beige taches
+    if (vUp > .5 && vWP.y > 3.5) { // toit : beton gris-beige taches (pas les baches des boutiques, plus bas)
       float n = bn(vWP.xz * .35) * .6 + bn(vWP.xz * 2.1) * .4;
       diffuseColor.rgb = mix(vec3(.62,.58,.52), vec3(.78,.74,.66), n) * mix(.85, 1.05, bn(vWP.xz * 9.));
-    } else {
+    } else if (vUp < .5) {
       float streak = bn(vec2(along * 1.3, vWP.y * .06)) * bn(vec2(along * 4.1, vWP.y * .25));
       diffuseColor.rgb *= 1. - streak * .28;
       float foot = 1. - smoothstep(.0, 1.1 + bn(vec2(along * .7, 0.)) * .9, vWP.y);
@@ -566,15 +567,15 @@ const outsideDakar = x => x > 40000;
 // h = storeys [min, max), shops/roof/chantier/wall = probabilities, bare = unpainted parpaing.
 const BARE = 0xaaa59b;
 const STYLES = {
-  plateau: { pal: [0xe9d7a8, 0xdcb47c, 0xf2ece0, 0xe3c48f, 0xc98f6a, 0xf0e6d2, 0xd7cfc0, 0xbfcfd6], h: [2, 9], shops: 0.85, roof: 0.15, chantier: 0, bare: 0, wall: 0 },
-  medina: { pal: [0xe6c15a, 0x7fb3cf, 0xe08a5b, 0xa9c98f, 0xf0e2c8, 0xdca3a0, 0xc9d3d6, 0xe8d4b0], h: [1, 4.6], shops: 0.65, roof: 0.9, chantier: 0.4, bare: 0.1, wall: 0 },
-  sicap: { pal: [0xf0dcb4, 0xe8cfa0, 0xdfe5d3, 0xf3e9d6, 0xe9c9b0, 0xd6e0e4], h: [1, 3], shops: 0.3, roof: 0.7, chantier: 0.2, bare: 0.05, wall: 0.55, wallPal: [0xf3efe6, 0xe8dcc0, 0xe5c99a] },
-  villa: { pal: [0xf6f2ea, 0xefe6d6, 0xe8dcc4, 0xf3ebe3, 0xdfd2bd, 0xe9e2d6], h: [1, 3.4], shops: 0.08, roof: 0.35, chantier: 0.08, bare: 0, wall: 0.95, wallPal: [0xf7f4ee, 0xf1ebe0, 0xe6dccb], boug: 0.7 },
-  banlieue: { pal: [BARE, BARE, 0xe5d3b0, 0xd9a877, 0xc7d0c9, 0xe8d4b0, 0xc6b9a4], h: [1, 3.3], shops: 0.5, roof: 0.95, chantier: 0.6, bare: 0.4, wall: 0.35, wallPal: [BARE, 0xd8c7a6] },
-  touba: { pal: [0xdcae7f, 0xe7c79a, 0xcd9468, 0xefe0c4, 0xe3b9a0, 0xd6c3a2], h: [1, 2.25], shops: 0.3, roof: 0.6, chantier: 0.5, bare: 0.3, wall: 0.8, wallPal: [0xdcae7f, 0xe7c79a, BARE, 0xefe0c4] },
-  diourbel: { pal: [0xe2c48e, 0xd9a877, 0xefe2c9, 0xc98f6a, 0xd8c2a0, 0xb9cfb0], h: [1, 2.4], shops: 0.35, roof: 0.6, chantier: 0.4, bare: 0.25, wall: 0.65, wallPal: [0xe2c48e, 0xefe2c9, BARE] },
-  rufisque: { pal: [0xe3b878, 0xd08a62, 0xf0e2c8, 0xbfd0c8, 0xe9c98f, 0xc3764f], h: [1, 3], shops: 0.6, roof: 0.6, chantier: 0.25, bare: 0.1, wall: 0.2, wallPal: [0xf0e2c8] },
-  village: { pal: [0xd8c2a0, 0xe0c9a0, 0xc9a57a, 0xe6d5b8], h: [1, 1.6], shops: 0.1, roof: 0.4, chantier: 0.3, bare: 0.4, wall: 0.7, wallPal: [0xd8c2a0, BARE] },
+  plateau: { sand: 0, pal: [0xe9d7a8, 0xdcb47c, 0xf2ece0, 0xe3c48f, 0xc98f6a, 0xf0e6d2, 0xd7cfc0, 0xbfcfd6], h: [2, 9], shops: 0.85, roof: 0.15, chantier: 0, bare: 0, wall: 0 },
+  medina: { sand: 0.15, pal: [0xe6c15a, 0x7fb3cf, 0xe08a5b, 0xa9c98f, 0xf0e2c8, 0xdca3a0, 0xc9d3d6, 0xe8d4b0], h: [1, 4.6], shops: 0.65, roof: 0.9, chantier: 0.4, bare: 0.1, wall: 0 },
+  sicap: { sand: 0.1, pal: [0xf0dcb4, 0xe8cfa0, 0xdfe5d3, 0xf3e9d6, 0xe9c9b0, 0xd6e0e4], h: [1, 3], shops: 0.3, roof: 0.7, chantier: 0.2, bare: 0.05, wall: 0.55, wallPal: [0xf3efe6, 0xe8dcc0, 0xe5c99a] },
+  villa: { sand: 0.15, pal: [0xf6f2ea, 0xefe6d6, 0xe8dcc4, 0xf3ebe3, 0xdfd2bd, 0xe9e2d6], h: [1, 3.4], shops: 0.08, roof: 0.35, chantier: 0.08, bare: 0, wall: 0.95, wallPal: [0xf7f4ee, 0xf1ebe0, 0xe6dccb], boug: 0.7 },
+  banlieue: { sand: 0.7, pal: [BARE, BARE, 0xe5d3b0, 0xd9a877, 0xc7d0c9, 0xe8d4b0, 0xc6b9a4], h: [1, 3.3], shops: 0.5, roof: 0.95, chantier: 0.6, bare: 0.4, wall: 0.35, wallPal: [BARE, 0xd8c7a6] },
+  touba: { sand: 0.9, pal: [0xdcae7f, 0xe7c79a, 0xcd9468, 0xefe0c4, 0xe3b9a0, 0xd6c3a2], h: [1, 2.25], shops: 0.3, roof: 0.6, chantier: 0.5, bare: 0.3, wall: 0.8, wallPal: [0xdcae7f, 0xe7c79a, BARE, 0xefe0c4] },
+  diourbel: { sand: 0.6, pal: [0xe2c48e, 0xd9a877, 0xefe2c9, 0xc98f6a, 0xd8c2a0, 0xb9cfb0], h: [1, 2.4], shops: 0.35, roof: 0.6, chantier: 0.4, bare: 0.25, wall: 0.65, wallPal: [0xe2c48e, 0xefe2c9, BARE] },
+  rufisque: { sand: 0.3, pal: [0xe3b878, 0xd08a62, 0xf0e2c8, 0xbfd0c8, 0xe9c98f, 0xc3764f], h: [1, 3], shops: 0.6, roof: 0.6, chantier: 0.25, bare: 0.1, wall: 0.2, wallPal: [0xf0e2c8] },
+  village: { sand: 1, pal: [0xd8c2a0, 0xe0c9a0, 0xc9a57a, 0xe6d5b8], h: [1, 1.6], shops: 0.1, roof: 0.4, chantier: 0.3, bare: 0.4, wall: 0.7, wallPal: [0xd8c2a0, BARE] },
 };
 // anchors: [place name or [lat, lon], style, radius m]; the nearest anchor (relative to its radius) wins
 const ZONES = [
@@ -611,6 +612,12 @@ function addCompoundWall(B, cols, BG, pts, st, others) {
     if (!m) continue;
     const ax = px + nx * m - ux * m, az = pz + nz * m - uz * m, L = L0 + 2 * m; // run to the corners
     const parts = i === gate && L > 6 ? [[0, L / 2 - 1.6], [L / 2 + 1.6, L]] : [[0, L]];
+    if (parts.length > 1) { // portail en tole (rouge, noir, gris, vert, bleu) entre deux piliers
+      const gx0 = ax + ux * (L / 2 - 1.6), gz0 = az + uz * (L / 2 - 1.6), gx1 = ax + ux * (L / 2 + 1.6), gz1 = az + uz * (L / 2 + 1.6);
+      if (free(gx0, gz0) && free(gx1, gz1)) { strip(B, gx0, gz0, gx1, gz1, 0, 0.05, H - 0.05, 0.05, pick([0x8e1f1f, 0x1f1f22, 0x6b7076, 0x2f6b43, 0x274b7a, 0xb8b2a6]), 'lrt');
+        const ox = -uz * 0.1, oz = ux * 0.1, gp = [[gx0 + ox, gz0 + oz], [gx1 + ox, gz1 + oz], [gx1 - ox, gz1 - oz], [gx0 - ox, gz0 - oz]];
+        cols.push({ pts: gp, minx: Math.min(gx0, gx1) - 0.1, maxx: Math.max(gx0, gx1) + 0.1, minz: Math.min(gz0, gz1) - 0.1, maxz: Math.max(gz0, gz1) + 0.1 }); }
+    }
     for (const [s0, s1] of parts) {
       const x0 = ax + ux * s0, z0 = az + uz * s0, x1 = ax + ux * s1, z1 = az + uz * s1, mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
       if (!free(x0, z0) || !free(x1, z1)) continue;
@@ -649,7 +656,7 @@ function prism(B, ax, az, bx, bz, o, hw, ta, tb, ba, bb, colHex) {
   const L = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux, c = new THREE.Color(colHex);
   const P = (x, z, s, y) => [x + nx * (o + s * hw), y, z + nz * (o + s * hw)];
   const A0 = P(ax, az, -1, ba), A1 = P(ax, az, 1, ba), A2 = P(ax, az, 1, ta), A3 = P(ax, az, -1, ta), B0 = P(bx, bz, -1, bb), B1 = P(bx, bz, 1, bb), B2 = P(bx, bz, 1, tb), B3 = P(bx, bz, -1, tb);
-  const quad = (p, q, r, s) => { const e1 = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], e2 = [s[0] - p[0], s[1] - p[1], s[2] - p[2]]; let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; const l = Math.hypot(...n) || 1; n = n.map(v => v / l);
+  const quad = (s, r, q, p) => { const e1 = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], e2 = [s[0] - p[0], s[1] - p[1], s[2] - p[2]]; let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; const l = Math.hypot(...n) || 1; n = n.map(v => v / l);
     for (const v of [p, q, r, p, r, s]) { B.pos.push(...v); B.nor.push(...n); B.uv.push(0.01, 0.01); B.col.push(c.r, c.g, c.b); } };
   quad(A0, B0, B3, A3); quad(B1, A1, A2, B2); quad(A3, B3, B2, A2); quad(A1, B1, B0, A0); quad(A1, A0, A3, A2); quad(B0, B1, B2, B3);
 }
@@ -697,6 +704,39 @@ function motorwayEdges(BR, cols, r, i, y) {
 function addMedianCol(cols, ax, az, bx, bz, nx, nz, o) {
   const p = [[ax + nx * (o - 0.3), az + nz * (o - 0.3)], [bx + nx * (o - 0.3), bz + nz * (o - 0.3)], [bx + nx * (o + 0.3), bz + nz * (o + 0.3)], [ax + nx * (o + 0.3), az + nz * (o + 0.3)]];
   cols.push({ pts: p, top: 0.9, minx: Math.min(...p.map(q => q[0])), maxx: Math.max(...p.map(q => q[0])), minz: Math.min(...p.map(q => q[1])), maxz: Math.max(...p.map(q => q[1])) });
+}
+// thin strip along a wall edge with only the faces that can be seen (cheap): o = offset along the left normal,
+// faces: l = left side, r = right side, t = top, b = bottom
+function strip(B, ax, az, bx, bz, o, hw, top, bot, colHex, faces) {
+  const L = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux, c = new THREE.Color(colHex);
+  const P = (x, z, k, y) => [x + nx * (o + k * hw), y, z + nz * (o + k * hw)];
+  const quad = (p, q, r, t, n) => { for (const v of [p, q, r, p, r, t]) { B.pos.push(...v); B.nor.push(...n); B.uv.push(0.01, 0.01); B.col.push(c.r, c.g, c.b); } };
+  if (faces.includes('l')) quad(P(ax, az, 1, bot), P(bx, bz, 1, bot), P(bx, bz, 1, top), P(ax, az, 1, top), [nx, 0, nz]);
+  if (faces.includes('r')) quad(P(bx, bz, -1, bot), P(ax, az, -1, bot), P(ax, az, -1, top), P(bx, bz, -1, top), [-nx, 0, -nz]);
+  if (faces.includes('t')) quad(P(ax, az, -1, top), P(ax, az, 1, top), P(bx, bz, 1, top), P(bx, bz, -1, top), [0, 1, 0]);
+  if (faces.includes('b')) quad(P(ax, az, 1, bot), P(ax, az, -1, bot), P(bx, bz, -1, bot), P(bx, bz, 1, bot), [0, -1, 0]);
+}
+// What the street-level photos show on almost every Dakar building: the roof parapet (acrotere) with its inner
+// face and cap, concrete floor slabs showing as a band at each storey, small balconies with railings on the
+// upper floors, and coloured tarps (baches) shading the shops.
+const TARPS = [0x2a6fb5, 0x2f8f5a, 0xd8432f, 0xf2b01e, 0x1d4e89, 0x6b6f75, 0xe9e4da];
+function buildingDetails(B, pts, h, colHex, shops, st) {
+  if (pts.length > 10) return; // big complex footprints: walls only
+  let area = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; area += x1 * z2 - x2 * z1; }
+  const out = area > 0 ? -1 : 1, floors = Math.round(h / 3.1), band = new THREE.Color(colHex).lerp(new THREE.Color(0xf4efe6), 0.45).getHex();
+  for (let i = 0; i < pts.length; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[(i + 1) % pts.length], L = Math.hypot(bx - ax, bz - az); if (L < 1.2) continue;
+    const ux = (bx - ax) / L, uz = (bz - az) / L;
+    strip(B, ax, az, bx, bz, -out * 0.12, 0.12, h + 0.9, h, colHex, out > 0 ? 'rt' : 'lt'); // acrotere : face interieure + chaperon
+    for (let f = 1; f < Math.min(floors, 6); f++) strip(B, ax, az, bx, bz, out * 0.07, 0.07, f * 3.1 + 0.12, f * 3.1 - 0.14, band, out > 0 ? 'ltb' : 'rtb');
+    if (shops && L > 3.5 && h >= 3 && Math.random() < 0.6) { const tc = pick(TARPS), x0 = ax + ux * 0.3, z0 = az + uz * 0.3, x1 = bx - ux * 0.3, z1 = bz - uz * 0.3; // bache + lambrequin
+      strip(B, x0, z0, x1, z1, out * 0.8, 0.8, 3.0, 2.93, tc, 'tb'); strip(B, x0, z0, x1, z1, out * 1.6, 0.025, 3.0, 2.55, tc, 'lr'); }
+    if (floors >= 2 && L > 4) for (let f = 1; f < Math.min(floors, 5); f++) { if (Math.random() > (st === STYLES.villa ? 0.15 : 0.3)) continue;
+        const w = Math.min(L - 1, rand(2.4, 4)), t0 = rand(0.5, L - w - 0.5), y = f * 3.1, x0 = ax + ux * t0, z0 = az + uz * t0, x1 = x0 + ux * w, z1 = z0 + uz * w;
+        strip(B, x0, z0, x1, z1, out * 0.55, 0.55, y + 0.14, y - 0.06, band, 'tb'); // dalle du balcon
+        strip(B, x0, z0, x1, z1, out * 1.08, 0.04, y + 1.05, y + 0.14, pick([0xe8e4da, 0x2b2b2b, 0x2b4a6a, colHex]), 'lr'); // garde-corps
+      }
+  }
 }
 function addBuilding(B, pts, h, colHex, roofHex, shops = false) {
   let area = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; area += x1 * z2 - x2 * z1; }
@@ -817,7 +857,7 @@ function groundY(x, z) {
 }
 function buildChunk(gx, gz) {
   const k = ckey(gx, gz), group = new THREE.Group(), cols = [];
-  const R = { pos: [], col: [], uv: [] }, S = { pos: [], col: [], uv: [] }, M = { pos: [], col: [], uv: [] }, SE = [], BR = { pos: [], nor: [], uv: [], col: [] };
+  const R = { pos: [], col: [], uv: [] }, S = { pos: [], col: [], uv: [] }, M = { pos: [], col: [], uv: [] }, SE = [], BR = { pos: [], nor: [], uv: [], col: [] }, DR = { pos: [], col: [], uv: [] };
   const segs = segGrid.get(k) || [];
   const lamps = [], palms = [], neems = [];
   const sandy = new THREE.Color(0xcfae80), aspA = new THREE.Color(0xd4d2ce), aspB = new THREE.Color(0xe0dbd2), aspC = new THREE.Color(0xc4c4c8), side = new THREE.Color(0xc4b8a2), white = new THREE.Color(1, 1, 1);
@@ -827,11 +867,12 @@ function buildChunk(gx, gz) {
   for (const [ri, list] of byRoad) {
     const r = roads[ri]; list.sort((a, b) => a - b);
     const y = 0.16 + (10 - (r.t === 10 ? 2 : r.t)) * 0.012;
-    const dirt = (r.t >= 5 && r.t <= 9 && outsideDakar(r.pts[0][0])) || r.t === 9;
-    const color = dirt ? sandy : r.t <= 1 ? aspC : r.t <= 4 ? aspA : aspB;
+    // neighbourhood streets in the banlieue, Touba or the villages are packed sand, not tarmac (Street View)
+    const dirt = r.t === 9 || (r.t >= 5 && r.t <= 8 && !r.y && ((ri * 2654435761) >>> 0) % 1000 / 1000 < styleAt(...r.pts[r.pts.length >> 1]).sand);
+    const color = dirt ? white : r.t <= 1 ? aspC : r.t <= 4 ? aspA : aspB;
     for (const i of list) {
       const up = r.y && Math.max(r.y[i], r.y[i + 1]) > 0.05;
-      ribbon(R.pos, R.col, R.uv, r.pts, i, i + 1, r.w / 2, y, color, r.y);
+      const RR = dirt ? DR : R; ribbon(RR.pos, RR.col, RR.uv, r.pts, i, i + 1, r.w / 2, y, color, r.y);
       if (up) bridgeSeg(BR, cols, r, i, y); // tablier / rampe : garde-corps et piliers, pas de trottoir ni de sable
       else if (r.t === 0 && r.ow) motorwayEdges(BR, cols, r, i, y);
       if (!up && !dirt && r.t >= 1 && r.t <= 8) { const sw = r.t <= 2 ? 0.7 : r.t <= 4 ? 1.3 : rand(1.4, 2.4); sandEdge(SE, r.pts, r.cum, i, r.w / 2 + 0.05, Math.max(0.6, r.w / 2 - sw), y + 0.01); }
@@ -860,7 +901,7 @@ function buildChunk(gx, gz) {
     }
   }
   const mk = (G, mat, idx) => { if (!G.pos.length) return; const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(G.pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(G.col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(G.uv, 2)); g.computeVertexNormals(); const m = new THREE.Mesh(g, mat); m.receiveShadow = true; group.add(m); };
-  mk(S, sideMat); mk(R, roadMat); mk(M, markMat);
+  mk(S, sideMat); mk(R, roadMat); mk(DR, dirtRoadMat); mk(M, markMat);
   if (SE.length) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(SE.flatMap(q => [q[0], q[4], q[1]]), 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(SE.flatMap(q => [q[2], q[3]]), 2)); g.computeVertexNormals(); const m = new THREE.Mesh(g, sandEdgeMat); m.receiveShadow = true; m.renderOrder = 1; group.add(m); }
 
   // buildings: OSM
@@ -879,7 +920,7 @@ function buildChunk(gx, gz) {
     let h;
     if (kind === 1) h = 11; else if (lv) h = lv * 3.1; else h = 3.1 * storeys(st);
     if (st === STYLES.plateau && h >= 18 && kind !== 1 && Math.random() < 0.4) addBuilding(GL, pts, h, pick([0xffffff, 0xe6eef0, 0xf0ebe0]), 0xb9b0a0);
-    else addBuilding(B, pts, h, kind === 1 ? 0xf4f1ea : facadeOf(st), 0xb9b0a0, kind !== 1 && Math.random() < st.shops);
+    else { const fc = kind === 1 ? 0xf4f1ea : facadeOf(st), sh = kind !== 1 && Math.random() < st.shops; addBuilding(B, pts, h, fc, 0xb9b0a0, sh); if (kind !== 1) buildingDetails(B, pts, h, fc, sh, st); }
     if (kind !== 1 && Math.random() < st.roof) roofExtras(B, RF, pts, h, h > 13, st.chantier);
     const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
     cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
@@ -912,7 +953,7 @@ function buildChunk(gx, gz) {
           const st = styleAt(cx, cz), fl = storeys(st);
           const faceRoad = Math.atan2(uz * s, -ux * s); // model front (+z) toward the road
           if (real && PROPS[real]) placeProp(group, real, cx, cz, faceRoad);
-          else { addBuilding(B, pts, fl * 3.1, facadeOf(st), 0xb5ab9a, Math.random() < st.shops); if (Math.random() < st.roof) roofExtras(B, RF, pts, fl * 3.1, false, st.chantier); }
+          else { const fc = facadeOf(st), sh = Math.random() < st.shops; addBuilding(B, pts, fl * 3.1, fc, 0xb5ab9a, sh); buildingDetails(B, pts, fl * 3.1, fc, sh, st); if (Math.random() < st.roof) roofExtras(B, RF, pts, fl * 3.1, false, st.chantier); }
           const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
           cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
           if (st.wall && Math.random() < st.wall * 0.6) walls.push([pts, st]);
