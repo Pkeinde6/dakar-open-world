@@ -414,6 +414,19 @@ float bn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(bh(i)
     }`);
 };
 bldMat.userData.nightI = 1.6; nightMats.push(bldMat);
+// Plateau office blocks (banks, ministries, hotels): tinted curtain walls with stone spandrels between floors
+const glassTex = canvasTex(512, 512, (g) => {
+  for (let fy = 0; fy < 4; fy++) { const y = fy * 128;
+    const grd = g.createLinearGradient(0, y, 0, y + 100); grd.addColorStop(0, '#8fb3bf'); grd.addColorStop(0.5, '#4d6f7c'); grd.addColorStop(1, '#2c434d');
+    g.fillStyle = grd; g.fillRect(0, y, 512, 100);
+    g.fillStyle = '#d9d2c4'; g.fillRect(0, y + 100, 512, 28); g.fillStyle = 'rgba(0,0,0,.12)'; g.fillRect(0, y + 100, 512, 3);
+    for (let x = 0; x < 512; x += 64) { g.fillStyle = '#c9c3b6'; g.fillRect(x, y, 5, 100); }
+    for (let k = 0; k < 6; k++) if (Math.random() < 0.5) { g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(((Math.random() * 8) | 0) * 64 + 5, y, 59, 100); } // stores baissés
+  }
+  g.fillStyle = '#fff'; g.fillRect(0, 496, 24, 16);
+});
+const glassBldMat = new THREE.MeshStandardMaterial({ map: glassTex, vertexColors: true, roughness: 0.2, metalness: 0.55, emissiveMap: litTex, emissive: 0xffffff, emissiveIntensity: 0 });
+glassBldMat.userData.nightI = 1.2; nightMats.push(glassBldMat);
 const lampMat = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0xffd9a0, emissiveIntensity: 0 }); lampMat.userData.nightI = 6; nightMats.push(lampMat);
 const poleMat = new THREE.MeshStandardMaterial({ color: 0x777b80, roughness: 0.5, metalness: 0.6 });
 const glowMat = new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 });
@@ -526,22 +539,27 @@ const facadeOf = st => Math.random() < st.bare ? BARE : pick(st.pal);
 // murs de cloture around a compound: each footprint edge pushed out by `m`, gap for the gate on the road side
 function addCompoundWall(B, cols, BG, pts, st, others) {
   if (pts.length > 8) return;
-  const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]), cx = xs.reduce((a, b) => a + b) / xs.length, cz = zs.reduce((a, b) => a + b) / zs.length;
-  const m = rand(1.6, 3.2), col = pick(st.wallPal || [0xf3efe6]), H = rand(1.9, 2.5);
-  const out = pts.map(([x, z]) => { const dx = x - cx, dz = z - cz, L = Math.hypot(dx, dz) || 1; return [x + dx / L * m * 1.3, z + dz / L * m * 1.3]; });
-  const blocked = (x, z) => roadOverlap(x, z, 0.3) || isWater(x, z) || others.some(c => c.pts !== pts && x > c.minx - 0.3 && x < c.maxx + 0.3 && z > c.minz - 0.3 && z < c.maxz + 0.3);
-  let gate = -1, gd = 1e9; // gate on the edge closest to a road
-  out.forEach(([x, z], i) => { const [x2, z2] = out[(i + 1) % out.length], n = nearestRoad((x + x2) / 2, (z + z2) / 2, 0); if (n && n.d < gd) { gd = n.d; gate = i; } });
-  for (let i = 0; i < out.length; i++) {
-    const [ax, az] = out[i], [bx, bz] = out[(i + 1) % out.length], dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz); if (L < 1.5) continue;
-    const ux = dx / L, uz = dz / L, rot = Math.atan2(-dz, dx);
-    const parts = i === gate && L > 5 ? [[0, L / 2 - 1.6], [L / 2 + 1.6, L]] : [[0, L]];
+  let area = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; area += x1 * z2 - x2 * z1; }
+  const col = pick(st.wallPal || [0xf3efe6]), H = st.boug ? rand(2.4, 3) : rand(1.9, 2.5), m0 = rand(1.8, 3.4);
+  // a wall point is free if it is off the carriageway (sidewalk is fine) and not inside another building
+  const free = (x, z) => !roadOverlap(x, z, -0.3) && !isWater(x, z) && !others.some(c => c.pts !== pts && x > c.minx && x < c.maxx && z > c.minz && z < c.maxz && inPoly(x, z, c.pts));
+  let gate = -1, gd = 1e9; // gate on the edge facing the nearest road
+  pts.forEach(([x, z], i) => { const [x2, z2] = pts[(i + 1) % pts.length], n = nearestRoad((x + x2) / 2, (z + z2) / 2, 0); if (n && n.d < gd) { gd = n.d; gate = i; } });
+  for (let i = 0; i < pts.length; i++) {
+    const [px, pz] = pts[i], [qx, qz] = pts[(i + 1) % pts.length], dx = qx - px, dz = qz - pz, L0 = Math.hypot(dx, dz); if (L0 < 2) continue;
+    const ux = dx / L0, uz = dz / L0, s = area > 0 ? 1 : -1, nx = uz * s, nz = -ux * s, rot = Math.atan2(-dz, dx); // outward normal
+    // the yard is narrower where the street or a neighbour is close: try the full setback, then smaller ones
+    let m = 0; for (const t of [m0, m0 * 0.6, 1]) { const ok = [0, 0.5, 1].every(f => free(px + dx * f + nx * t, pz + dz * f + nz * t)); if (ok) { m = t; break; } }
+    if (!m) continue;
+    const ax = px + nx * m - ux * m, az = pz + nz * m - uz * m, L = L0 + 2 * m; // run to the corners
+    const parts = i === gate && L > 6 ? [[0, L / 2 - 1.6], [L / 2 + 1.6, L]] : [[0, L]];
     for (const [s0, s1] of parts) {
       const x0 = ax + ux * s0, z0 = az + uz * s0, x1 = ax + ux * s1, z1 = az + uz * s1, mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
-      if (blocked(x0, z0) || blocked(x1, z1) || blocked(mx, mz)) continue;
+      if (!free(x0, z0) || !free(x1, z1)) continue;
       addBox(B, mx, 0, mz, s1 - s0, H, 0.22, rot, col);
+      for (let d = 0; d <= s1 - s0 + 0.01; d += (s1 - s0) / Math.max(1, Math.round((s1 - s0) / 3.2))) addBox(B, x0 + ux * d, 0, z0 + uz * d, 0.42, H + 0.25, 0.42, rot, col); // pilastres
       addBox(B, mx, H, mz, s1 - s0 + 0.1, 0.12, 0.34, rot, 0xe9e4da); // chaperon
-      const nx = -uz * 0.15, nz = ux * 0.15, wp = [[x0 + nx, z0 + nz], [x1 + nx, z1 + nz], [x1 - nx, z1 - nz], [x0 - nx, z0 - nz]];
+      const ox = -uz * 0.15, oz = ux * 0.15, wp = [[x0 + ox, z0 + oz], [x1 + ox, z1 + oz], [x1 - ox, z1 - oz], [x0 - ox, z0 - oz]];
       cols.push({ pts: wp, minx: Math.min(x0, x1) - 0.2, maxx: Math.max(x0, x1) + 0.2, minz: Math.min(z0, z1) - 0.2, maxz: Math.max(z0, z1) + 0.2 });
       if (st.boug && Math.random() < st.boug) for (let d = rand(0.5, 2); d < s1 - s0; d += rand(2.5, 6)) BG.push([x0 + ux * d, H, z0 + uz * d]);
     }
@@ -717,7 +735,7 @@ function buildChunk(gx, gz) {
   if (SE.length) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(SE.flatMap(q => [q[0], q[4], q[1]]), 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(SE.flatMap(q => [q[2], q[3]]), 2)); g.computeVertexNormals(); const m = new THREE.Mesh(g, sandEdgeMat); m.receiveShadow = true; m.renderOrder = 1; group.add(m); }
 
   // buildings: OSM
-  const B = { pos: [], nor: [], uv: [], col: [], shop: { pos: [], nor: [], uv: [], col: [] } }, RF = { tanks: [], dishes: [], rebar: [], lines: [] };
+  const B = { pos: [], nor: [], uv: [], col: [], shop: { pos: [], nor: [], uv: [], col: [] } }, GL = { pos: [], nor: [], uv: [], col: [] }, RF = { tanks: [], dishes: [], rebar: [], lines: [] };
   const ids = bGrid.get(k) || [], walls = [], BG = [];
   for (const bi of ids) {
     const [lv, kind, flat] = D.buildings[bi]; const pts = []; let x = 0, z = 0;
@@ -731,7 +749,8 @@ function buildChunk(gx, gz) {
     const st = styleAt(x, z);
     let h;
     if (kind === 1) h = 11; else if (lv) h = lv * 3.1; else h = 3.1 * storeys(st);
-    addBuilding(B, pts, h, kind === 1 ? 0xf4f1ea : facadeOf(st), 0xb9b0a0, kind !== 1 && Math.random() < st.shops);
+    if (st === STYLES.plateau && h >= 18 && kind !== 1 && Math.random() < 0.4) addBuilding(GL, pts, h, pick([0xffffff, 0xe6eef0, 0xf0ebe0]), 0xb9b0a0);
+    else addBuilding(B, pts, h, kind === 1 ? 0xf4f1ea : facadeOf(st), 0xb9b0a0, kind !== 1 && Math.random() < st.shops);
     if (kind !== 1 && Math.random() < st.roof) roofExtras(B, RF, pts, h, h > 13, st.chantier);
     const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
     cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
@@ -781,6 +800,12 @@ function buildChunk(gx, gz) {
     g.setAttribute('uv', new THREE.Float32BufferAttribute(B.uv, 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(B.col, 3));
     const m = new THREE.Mesh(g, bldMat); m.castShadow = Q.bshadow; m.receiveShadow = Q.shadow > 0; group.add(m);
   }
+  if (GL.pos.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(GL.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(GL.nor, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(GL.uv, 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(GL.col, 3));
+    const m = new THREE.Mesh(g, glassBldMat); m.castShadow = Q.bshadow; m.receiveShadow = Q.shadow > 0; group.add(m);
+  }
   if (B.shop.pos.length) {
     const g = new THREE.BufferGeometry(), S = B.shop;
     g.setAttribute('position', new THREE.Float32BufferAttribute(S.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(S.nor, 3));
@@ -792,7 +817,7 @@ function buildChunk(gx, gz) {
   { // toits : citernes, paraboles, fers d'attente, linge
     const tk = inst(G.tank, tankMat, RF.tanks, (o, [x, y, z]) => { o.position.set(x, y, z); o.rotation.set(0, rand(0, 6), 0); const k = rand(0.85, 1.15); o.scale.set(k, k, k); }, Q.bshadow);
     if (tk) { const c = new THREE.Color(); RF.tanks.forEach((t, i) => tk.setColorAt(i, c.set(t[3] ? 0x1c1c1e : pick([0xe8e8e2, 0x3d6fb0, 0xd9c48a])))); }
-    const bg = inst(G.bush, bougMat, BG, (o, [x, y, z]) => { o.position.set(x, y + 0.15, z); o.rotation.set(0, rand(0, 6), 0); const k = rand(0.45, 0.8); o.scale.set(k * 1.3, k * 0.7, k); }, false);
+    const bg = inst(G.bush, bougMat, BG, (o, [x, y, z]) => { o.position.set(x, y + 0.1, z); o.rotation.set(0, rand(0, 6), 0); const k = rand(0.3, 0.55); o.scale.set(k * 1.4, k * 0.6, k); }, false);
     if (bg) { const c = new THREE.Color(); BG.forEach((_, i) => bg.setColorAt(i, c.set(pick([0xc2207a, 0xd6338a, 0xb01c6c, 0x3f6b2a, 0xe0559c])))); }
     inst(G.dish, dishMat, RF.dishes, (o, [x, y, z, r]) => { o.position.set(x, y, z); o.rotation.set(0, r, 0); o.scale.set(1, 1, 1); }, false);
     if (RF.rebar.length) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(RF.rebar, 3)); group.add(new THREE.LineSegments(g, rebarMat)); }
