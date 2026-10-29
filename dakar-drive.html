@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dakar Drive</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#87b8e0;font-family:system-ui,sans-serif}
+  #hud{position:fixed;top:12px;left:12px;color:#fff;text-shadow:0 1px 3px #000;font-size:15px;line-height:1.5;pointer-events:none}
+  #stars{font-size:26px;color:#ffd23f;letter-spacing:2px}
+  #msg{position:fixed;top:40%;width:100%;text-align:center;color:#fff;font-size:44px;font-weight:800;text-shadow:0 3px 8px #000;pointer-events:none}
+  #siren{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 0 0 transparent;transition:box-shadow .15s}
+  #help{position:fixed;bottom:12px;left:12px;color:#fff;text-shadow:0 1px 3px #000;font-size:13px}
+</style>
+</head>
+<body>
+<div id="siren"></div>
+<div id="hud">
+  <div><b>DAKAR DRIVE</b> — Plateau</div>
+  <div id="speed">0 km/h</div>
+  <div id="stars"></div>
+  <div id="info"></div>
+</div>
+<div id="msg"></div>
+<div id="help">Flèches / ZQSD : conduire · Espace : frein à main · R : recommencer · C : caméra</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- Scene ----------
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa9d3f0);
+scene.fog = new THREE.Fog(0xd8e6ee, 120, 420);
+const camera = new THREE.PerspectiveCamera(65, innerWidth/innerHeight, 0.5, 1000);
+
+scene.add(new THREE.HemisphereLight(0xfff4dd, 0xc9a26b, 0.9));
+const sun = new THREE.DirectionalLight(0xffeccc, 1.6);
+sun.position.set(80,140,40);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera,{left:-120,right:120,top:120,bottom:-120,far:400});
+scene.add(sun, sun.target);
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+
+// ---------- City layout ----------
+const BLOCK = 46, ROAD = 14, N = 6;            // grid N x N blocks
+const CELL = BLOCK + ROAD;
+const HALF = N*CELL/2;
+const roadCenters = [];                        // coords of road center lines
+for(let i=0;i<=N;i++) roadCenters.push(-HALF + i*CELL);
+
+const mat = c => new THREE.MeshLambertMaterial({color:c});
+const box = (w,h,d,c,x,y,z,parent=scene)=>{
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), typeof c==='number'?mat(c):c);
+  m.position.set(x,y,z); m.castShadow=m.receiveShadow=true; parent.add(m); return m;
+};
+
+// sand ground + ocean (corniche on west side)
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(2000,2000), mat(0xd9b98a));
+ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
+const ocean = new THREE.Mesh(new THREE.PlaneGeometry(600,2000), new THREE.MeshPhongMaterial({color:0x1f7fb5,shininess:90}));
+ocean.rotation.x=-Math.PI/2; ocean.position.set(-HALF-330,0.05,0); scene.add(ocean);
+
+// roads
+const asphalt = mat(0x3b3b3e), line = mat(0xf2f2f2), yellow = mat(0xf2c230);
+const roadLen = N*CELL + ROAD;
+for(const c of roadCenters){
+  const h = new THREE.Mesh(new THREE.PlaneGeometry(roadLen,ROAD),asphalt);
+  h.rotation.x=-Math.PI/2; h.position.set(0,0.02,c); h.receiveShadow=true; scene.add(h);
+  const v = h.clone(); v.rotation.z=Math.PI/2; v.position.set(c,0.021,0); scene.add(v);
+  // dashed center lines
+  for(let s=-HALF;s<HALF;s+=8){
+    const d1=new THREE.Mesh(new THREE.PlaneGeometry(3.5,0.3),yellow); d1.rotation.x=-Math.PI/2; d1.position.set(s+4,0.03,c); scene.add(d1);
+    const d2=d1.clone(); d2.rotation.z=Math.PI/2; d2.position.set(c,0.03,s+4); scene.add(d2);
+  }
+}
+// sidewalks + buildings per block
+const facade = [0xf1e3c6,0xe8c99a,0xffffff,0xd99a5b,0xc96f4a,0xf5d68a,0xb9d7c4,0xe9b7a1];
+const colliders = []; // AABB {minX,maxX,minZ,maxZ}
+const winMat = mat(0x5a7c94);
+function building(x,z,w,d,h){
+  const g = new THREE.Group(); scene.add(g);
+  box(w,h,d,facade[(Math.random()*facade.length)|0],x,h/2,z,g);
+  // windows strips
+  for(let y=3;y<h-1;y+=3.2){
+    box(w+0.05,1.2,d*0.8,winMat,x,y,z,g);
+    box(w*0.8,1.2,d+0.05,winMat,x,y,z,g);
+  }
+  // rooftop parapet / water tank (very Dakar)
+  box(w+0.6,0.8,d+0.6,0xeeeeee,x,h+0.4,z,g);
+  if(Math.random()<0.5) box(1.6,1.4,1.6,0x2d6db5,x+w/4,h+1.5,z-d/4,g);
+  colliders.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2});
+}
+function palm(x,z){
+  const g=new THREE.Group(); g.position.set(x,0,z); scene.add(g);
+  const t=new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.4,8,6),mat(0x8a6a44)); t.position.y=4; t.castShadow=true; g.add(t);
+  for(let i=0;i<7;i++){
+    const l=new THREE.Mesh(new THREE.BoxGeometry(4.5,0.1,0.9),mat(0x3f8a3a));
+    l.position.set(Math.cos(i)*2,8,Math.sin(i)*2); l.rotation.y=-i; l.rotation.z=-0.35; l.castShadow=true; g.add(l);
+  }
+}
+function baobab(x,z){
+  const g=new THREE.Group(); g.position.set(x,0,z); scene.add(g);
+  const t=new THREE.Mesh(new THREE.CylinderGeometry(1.4,2.2,7,8),mat(0x9b8570)); t.position.y=3.5; t.castShadow=true; g.add(t);
+  for(let i=0;i<5;i++){
+    const b=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.5,4,5),mat(0x9b8570));
+    b.position.set(Math.cos(i*1.3)*1.6,8,Math.sin(i*1.3)*1.6); b.rotation.set(Math.sin(i)*0.8,0,Math.cos(i)*0.8); g.add(b);
+    const f=new THREE.Mesh(new THREE.SphereGeometry(1.3,6,5),mat(0x6d8f3f)); f.position.set(Math.cos(i*1.3)*3,9.8,Math.sin(i*1.3)*3); f.castShadow=true; g.add(f);
+  }
+  colliders.push({minX:x-2,maxX:x+2,minZ:z-2,maxZ:z+2});
+}
+for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+  const cx = -HALF + i*CELL + CELL/2, cz = -HALF + j*CELL + CELL/2;
+  const sw = new THREE.Mesh(new THREE.BoxGeometry(BLOCK,0.3,BLOCK),mat(0xcfc4b0));
+  sw.position.set(cx,0.15,cz); sw.receiveShadow=true; scene.add(sw);
+  if(i===2&&j===2){ // Place de l'Indépendance style square
+    const p=new THREE.Mesh(new THREE.BoxGeometry(BLOCK-6,0.4,BLOCK-6),mat(0x6fa055)); p.position.set(cx,0.2,cz); scene.add(p);
+    box(3,14,3,0xf4f1e8,cx,7,cz); box(5,1,5,0xd8cdb5,cx,0.8,cz);
+    colliders.push({minX:cx-2.5,maxX:cx+2.5,minZ:cz-2.5,maxZ:cz+2.5});
+    palm(cx-12,cz-12);palm(cx+12,cz-12);palm(cx-12,cz+12);palm(cx+12,cz+12);
+    continue;
+  }
+  if(i===0&&j===4){ baobab(cx,cz); palm(cx+14,cz+14); palm(cx-14,cz-10); continue; }
+  // 4 buildings per block
+  const q = (BLOCK-8)/2;
+  for(const [dx,dz] of [[-1,-1],[1,-1],[-1,1],[1,1]]){
+    const w=q-2-Math.random()*4, d=q-2-Math.random()*4, h=6+Math.random()*(i>2?26:14);
+    building(cx+dx*q/2, cz+dz*q/2, w, d, h);
+  }
+  palm(cx-BLOCK/2+2,cz-BLOCK/2+2); palm(cx+BLOCK/2-2,cz+BLOCK/2-2);
+}
+// Monument de la Renaissance (stylised) far on a hill
+{
+  const g=new THREE.Group(); g.position.set(-HALF+20,0,-HALF-90); scene.add(g);
+  const hill=new THREE.Mesh(new THREE.ConeGeometry(45,28,10),mat(0xb99a6a)); hill.position.y=14; g.add(hill);
+  const bronze=mat(0x6b4a2b);
+  const b1=new THREE.Mesh(new THREE.CylinderGeometry(2,3.5,24,8),bronze); b1.position.set(0,40,0); b1.rotation.z=0.25; g.add(b1);
+  const b2=new THREE.Mesh(new THREE.CylinderGeometry(1.5,2.5,18,8),bronze); b2.position.set(4,36,2); b2.rotation.z=-0.2; g.add(b2);
+  const arm=new THREE.Mesh(new THREE.CylinderGeometry(0.8,0.8,12,6),bronze); arm.position.set(-5,54,0); arm.rotation.z=0.9; g.add(arm);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(2.2,8,8),bronze); head.position.set(-2,53,0); g.add(head);
+}
+
+// ---------- Traffic lights ----------
+// phase: 0 = NS green, 1 = NS yellow, 2 = EW green, 3 = EW yellow
+let lightPhase = 0, lightTimer = 0;
+const PHASE_T = [9,2.5,9,2.5];
+const lights = [];
+const lampOn = {g:0x22ff44,y:0xffcc00,r:0xff2a2a}, lampOff=0x222222;
+function makeLight(x,z,axis){ // axis 'ns' or 'ew' controls traffic along that axis
+  const g=new THREE.Group(); g.position.set(x,0,z); scene.add(g);
+  box(0.25,4.5,0.25,0x333333,0,2.25,0,g);
+  const head=box(0.7,2,0.7,0x111111,0,5,0,g);
+  const r=box(0.5,0.5,0.75,lampOff,0,5.6,0,g), y=box(0.5,0.5,0.75,lampOff,0,5,0,g), gr=box(0.5,0.5,0.75,lampOff,0,4.4,0,g);
+  lights.push({axis,r,y,g:gr});
+}
+for(let i=1;i<N;i++)for(let j=1;j<N;j++){
+  const x=roadCenters[i], z=roadCenters[j], o=ROAD/2+1;
+  makeLight(x+o,z+o,'ns'); makeLight(x-o,z-o,'ns');
+  makeLight(x-o,z+o,'ew'); makeLight(x+o,z-o,'ew');
+  // zebra crossings
+  for(const [px,pz,rot] of [[x,z+ROAD/2+2,0],[x,z-ROAD/2-2,0],[x+ROAD/2+2,z,1],[x-ROAD/2-2,z,1]]){
+    for(let k=-5;k<=5;k+=2){
+      const s=new THREE.Mesh(new THREE.PlaneGeometry(1,3),line); s.rotation.x=-Math.PI/2;
+      if(rot){s.rotation.z=Math.PI/2; s.position.set(px,0.04,pz+k);} else s.position.set(px+k,0.04,pz);
+      scene.add(s);
+    }
+  }
+}
+const stateFor = axis => {
+  if(axis==='ns') return lightPhase===0?'g':lightPhase===1?'y':'r';
+  return lightPhase===2?'g':lightPhase===3?'y':'r';
+};
+function updateLights(dt){
+  lightTimer+=dt; if(lightTimer>PHASE_T[lightPhase]){lightTimer=0;lightPhase=(lightPhase+1)%4;}
+  for(const l of lights){
+    const s=stateFor(l.axis);
+    l.r.material.color.setHex(s==='r'?lampOn.r:lampOff);
+    l.y.material.color.setHex(s==='y'?lampOn.y:lampOff);
+    l.g.material.color.setHex(s==='g'?lampOn.g:lampOff);
+  }
+}
+
+// ---------- Vehicles ----------
+function makeCar(body, opts={}){
+  const g=new THREE.Group();
+  const L=opts.len||4.4, W=opts.w||2, H=opts.h||1.1;
+  box(W,H,L,body,0,0.5+H/2,0,g);
+  box(W*0.9,H*0.8,L*0.5,opts.cab||0x9fc4db,0,0.5+H+H*0.4,-L*0.05,g);
+  if(opts.rapide){ // car rapide: yellow/blue minibus with roof rack
+    box(W+0.05,0.4,L,0x1d55a8,0,0.9,0,g);
+    box(W*0.9,0.2,L*0.8,0x333333,0,0.5+H+H*0.8+0.2,0,g);
+  }
+  for(const [x,z] of [[-W/2,L*0.33],[W/2,L*0.33],[-W/2,-L*0.33],[W/2,-L*0.33]]){
+    const w=new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.3,12),mat(0x111111));
+    w.rotation.z=Math.PI/2; w.position.set(x,0.42,z); g.add(w);
+  }
+  box(0.4,0.2,0.05,0xfff6c0,-W/3,0.9,L/2,g); box(0.4,0.2,0.05,0xfff6c0,W/3,0.9,L/2,g);
+  box(0.4,0.2,0.05,0xaa0000,-W/3,0.9,-L/2,g); box(0.4,0.2,0.05,0xaa0000,W/3,0.9,-L/2,g);
+  scene.add(g); return g;
+}
+
+// Player
+const player = { mesh: makeCar(0xd8262e), x: roadCenters[1]+3.5, z: roadCenters[3]+10, angle: Math.PI, speed:0 };
+player.mesh.rotation.y = player.angle;
+
+// AI traffic on lanes. Lane: axis, roadIdx, dir(+1/-1)
+const AI_COLORS=[0xf5c400,0xffffff,0x2b6cb0,0x1f8a4c,0x777777,0xf5c400];
+const traffic=[];
+for(let k=0;k<26;k++){
+  const axis=Math.random()<0.5?'x':'z', dir=Math.random()<0.5?1:-1;
+  const r=roadCenters[1+((Math.random()*(N-1))|0)];
+  const rapide=Math.random()<0.3;
+  const m=makeCar(rapide?0xf2c200:AI_COLORS[k%AI_COLORS.length],{rapide,len:rapide?5.5:4.2,h:rapide?1.6:1.1});
+  traffic.push({mesh:m,axis,dir,lane:r+dir*3.5*(axis==='x'?1:-1),pos:(Math.random()*2-1)*HALF,speed:0,max:9+Math.random()*5});
+}
+function aiPos(c){ return c.axis==='x' ? [c.pos,c.lane] : [c.lane,c.pos]; }
+
+// ---------- Pedestrians ----------
+const SKIN=[0x5a3a22,0x3e2716,0x6b4528,0x4a2e1a];
+const BOUBOU=[0x1e88e5,0xffb300,0x43a047,0xe53935,0x8e24aa,0xffffff,0x00897b];
+const peds=[];
+function makePed(){
+  const g=new THREE.Group();
+  const c=BOUBOU[(Math.random()*BOUBOU.length)|0];
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.55,1.4,8),mat(c)); body.position.y=0.95; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.24,8,8),mat(SKIN[(Math.random()*4)|0])); head.position.y=1.9; g.add(head);
+  if(Math.random()<0.4){const hat=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.24,0.2,8),mat(c)); hat.position.y=2.1; g.add(hat);}
+  const legL=box(0.15,0.5,0.15,0x222222,-0.15,0.25,0,g), legR=box(0.15,0.5,0.15,0x222222,0.15,0.25,0,g);
+  scene.add(g); return {g,legL,legR,body};
+}
+// pedestrians walk around block sidewalks and cross at crosswalks
+for(let k=0;k<70;k++){
+  const p=makePed();
+  const i=1+((Math.random()*(N-1))|0), j=1+((Math.random()*(N-1))|0);
+  peds.push({...p, ix:i, jz:j, state:'walk', t:Math.random()*100, x:0,z:0, tx:0,tz:0, speed:1.2+Math.random()*0.6, alive:true, vy:0, rot:0});
+  pickTarget(peds[peds.length-1], true);
+}
+function cornerPos(i,j,cx,cz){ // corner of intersection (i,j), quadrant cx,cz in {-1,1}
+  const o=ROAD/2+1.5; return [roadCenters[i]+cx*o, roadCenters[j]+cz*o];
+}
+function pickTarget(p, init){
+  if(init){ p.cx=Math.random()<.5?-1:1; p.cz=Math.random()<.5?-1:1; [p.x,p.z]=cornerPos(p.ix,p.jz,p.cx,p.cz); }
+  // either cross the street (to adjacent corner) or walk along sidewalk to next intersection
+  if(Math.random()<0.6){
+    p.crossAxis = Math.random()<0.5?'x':'z';     // crossing across x means moving in x
+    p.ncx = p.crossAxis==='x'?-p.cx:p.cx; p.ncz = p.crossAxis==='z'?-p.cz:p.cz;
+    [p.tx,p.tz]=cornerPos(p.ix,p.jz,p.ncx,p.ncz); p.state='waitCross';
+  } else {
+    const dirX=Math.random()<0.5;
+    const ni = dirX ? p.ix+p.cx : p.ix, nj = dirX ? p.jz : p.jz+p.cz;
+    if(ni<1||ni>N-1||nj<1||nj>N-1){ return pickTarget(p,false); }
+    p.ix=ni; p.jz=nj; if(dirX) p.cx=-p.cx; else p.cz=-p.cz;
+    [p.tx,p.tz]=cornerPos(p.ix,p.jz,p.cx,p.cz); p.state='walk';
+  }
+}
+function updatePeds(dt){
+  for(const p of peds){
+    if(!p.alive){ // ragdoll-ish fall
+      if(p.g.position.y>0||p.vy>0){ p.vy-=25*dt; p.g.position.y=Math.max(0,p.g.position.y+p.vy*dt); p.g.position.x+=p.vx*dt; p.g.position.z+=p.vz*dt; }
+      p.g.rotation.x=Math.min(Math.PI/2,p.g.rotation.x+dt*6);
+      continue;
+    }
+    if(p.state==='waitCross'){
+      // pedestrians cross when cars on the road they cross have red. Crossing in x = crossing a NS road → NS cars must be red
+      const s = stateFor(p.crossAxis==='x'?'ns':'ew');
+      if(s==='r' && lightTimer < PHASE_T[lightPhase]-3){ p.state='cross'; }
+      else { p.legL.rotation.x=p.legR.rotation.x=0; continue; }
+    }
+    const dx=p.tx-p.x, dz=p.tz-p.z, d=Math.hypot(dx,dz);
+    const sp = p.speed*(p.state==='cross'?1.4:1);
+    if(d<0.2){
+      if(p.state==='cross'){ p.cx=p.ncx; p.cz=p.ncz; }
+      pickTarget(p,false);
+    } else {
+      p.x+=dx/d*sp*dt; p.z+=dz/d*sp*dt; p.g.rotation.y=Math.atan2(dx,dz);
+      p.t+=dt*sp*5; p.legL.rotation.x=Math.sin(p.t)*0.6; p.legR.rotation.x=-Math.sin(p.t)*0.6;
+    }
+    p.g.position.set(p.x,0,p.z);
+  }
+}
+
+// ---------- Input ----------
+const keys={};
+addEventListener('keydown',e=>{keys[e.code]=true; if(e.code==='KeyR')reset(); if(e.code==='KeyC')camMode=(camMode+1)%2; if(e.code==='KeyM') audioToggle(); });
+addEventListener('keyup',e=>keys[e.code]=false);
+let camMode=0;
+
+// ---------- Police ----------
+let wanted=0, wantedCool=0, police=[], busted=false, bustTimer=0, hits=0;
+function spawnPolice(){
+  const m=makeCar(0xffffff,{cab:0x223344});
+  box(2.02,0.35,4.42,0x0b3d91,0,1.0,0,m);
+  const red=box(0.6,0.25,0.4,0xff0000,-0.4,2.15,0,m), blue=box(0.6,0.25,0.4,0x0044ff,0.4,2.15,0,m);
+  const a=Math.random()*Math.PI*2, R=70;
+  const c={mesh:m,x:player.x+Math.cos(a)*R,z:player.z+Math.sin(a)*R,angle:0,speed:0,red,blue};
+  // snap to nearest road
+  c.x=nearestRoad(c.x); m.position.set(c.x,0,c.z);
+  police.push(c);
+}
+const nearestRoad = v => roadCenters.reduce((a,b)=>Math.abs(b-v)<Math.abs(a-v)?b:a);
+function updatePolice(dt,time){
+  for(const c of police){
+    const dx=player.x-c.x, dz=player.z-c.z, dist=Math.hypot(dx,dz);
+    const target=Math.atan2(dx,dz);
+    let diff=((target-c.angle+Math.PI*3)%(Math.PI*2))-Math.PI;
+    c.angle+=Math.max(-2.2*dt,Math.min(2.2*dt,diff));
+    const maxS = 26+wanted*2;
+    c.speed += (dist>8?18:-25)*dt; c.speed=Math.max(0,Math.min(maxS,c.speed));
+    const nx=c.x+Math.sin(c.angle)*c.speed*dt, nz=c.z+Math.cos(c.angle)*c.speed*dt;
+    if(!hitsBuilding(nx,nz,1.3)){c.x=nx;c.z=nz;} else { c.speed*=0.3; c.angle+=1.2*dt*Math.sign(diff||1)*4; }
+    c.mesh.position.set(c.x,0,c.z); c.mesh.rotation.y=c.angle;
+    const on=Math.floor(time*6)%2===0;
+    c.red.material.color.setHex(on?0xff0000:0x330000); c.blue.material.color.setHex(on?0x000a33:0x0044ff);
+    if(dist<4.5 && Math.abs(player.speed)<4 && !busted){ bustTimer+=dt; if(bustTimer>1.5) bust(); }
+    if(dist<3.2){ player.speed*=0.9; }
+  }
+  if(police.length) { if(!police.some(c=>Math.hypot(player.x-c.x,player.z-c.z)<5)) bustTimer=Math.max(0,bustTimer-dt); }
+}
+function setWanted(n){
+  wanted=Math.min(5,n); wantedCool=25;
+  while(police.length<Math.min(wanted,4)) spawnPolice();
+}
+function clearPolice(){ for(const c of police) scene.remove(c.mesh); police=[]; wanted=0; }
+function bust(){ busted=true; show('ARRÊTÉ ! 🚔<br><span style="font-size:20px">Appuie sur R pour recommencer</span>'); player.speed=0; }
+
+// ---------- Collisions ----------
+function hitsBuilding(x,z,r){
+  if(Math.abs(x)>HALF+ROAD/2-1||Math.abs(z)>HALF+ROAD/2-1) return true;
+  for(const b of colliders) if(x+r>b.minX&&x-r<b.maxX&&z+r>b.minZ&&z-r<b.maxZ) return true;
+  return false;
+}
+
+// ---------- AI traffic update ----------
+function updateTraffic(dt){
+  for(const c of traffic){
+    let want=c.max;
+    // stop at red lights: find next intersection ahead
+    for(let i=1;i<N;i++){
+      const ic=roadCenters[i], ahead=(ic-c.pos)*c.dir;
+      const stopLine=ROAD/2+3.5;
+      if(ahead>stopLine-0.5 && ahead<stopLine+12){
+        const s=stateFor(c.axis==='x'?'ew':'ns');
+        if(s!=='g') want=Math.min(want,Math.max(0,(ahead-stopLine)*1.2));
+      }
+    }
+    // car ahead (incl. player)
+    const [cx,cz]=aiPos(c);
+    const ahead=(ox,oz)=>{const along=c.axis==='x'?(ox-cx)*c.dir:(oz-cz)*c.dir; const lat=c.axis==='x'?Math.abs(oz-cz):Math.abs(ox-cx); return lat<2.2&&along>0&&along<12?along:null;};
+    for(const o of traffic){ if(o===c)continue; const [ox,oz]=aiPos(o); const a=ahead(ox,oz); if(a!==null) want=Math.min(want,(a-6)*1.5); }
+    const ap=ahead(player.x,player.z); if(ap!==null) want=Math.min(want,(ap-6)*1.5);
+    for(const p of peds){ if(!p.alive)continue; const a=ahead(p.x,p.z); if(a!==null&&a<9) want=0; }
+    want=Math.max(0,want);
+    c.speed += Math.sign(want-c.speed)*Math.min(Math.abs(want-c.speed),12*dt);
+    c.pos += c.dir*c.speed*dt;
+    if(c.pos>HALF+5) c.pos=-HALF-5; if(c.pos<-HALF-5) c.pos=HALF+5;
+    const [x,z]=aiPos(c);
+    c.mesh.position.set(x,0,z);
+    c.mesh.rotation.y = c.axis==='x' ? (c.dir>0?Math.PI/2:-Math.PI/2) : (c.dir>0?0:Math.PI);
+  }
+}
+
+// ---------- Player update ----------
+function updatePlayer(dt){
+  if(busted){ player.speed*=0.9; }
+  const up=keys.ArrowUp||keys.KeyW||keys.KeyZ, down=keys.ArrowDown||keys.KeyS;
+  const left=keys.ArrowLeft||keys.KeyA||keys.KeyQ, right=keys.ArrowRight||keys.KeyD;
+  if(!busted){
+    if(up) player.speed+=22*dt;
+    if(down) player.speed-= player.speed>0?35*dt:14*dt;
+    if(keys.Space) player.speed*=Math.pow(0.15,dt);
+  }
+  player.speed*=Math.pow(0.7,dt);
+  player.speed=Math.max(-10,Math.min(38,player.speed));
+  const steer=(left?1:0)-(right?1:0);
+  player.angle += steer*dt*Math.min(1,Math.abs(player.speed)/6)*2.2*Math.sign(player.speed||1);
+  const nx=player.x+Math.sin(player.angle)*player.speed*dt, nz=player.z+Math.cos(player.angle)*player.speed*dt;
+  if(!hitsBuilding(nx,nz,1.2)){player.x=nx;player.z=nz;} else { player.speed*=-0.3; }
+  // car collisions
+  for(const c of traffic){
+    const [x,z]=aiPos(c), d=Math.hypot(player.x-x,player.z-z);
+    if(d<3){ const push=(3-d)/d; player.x+=(player.x-x)*push*0.5; player.z+=(player.z-z)*push*0.5; player.speed*=0.5; }
+  }
+  // pedestrian hits
+  for(const p of peds){
+    if(!p.alive) continue;
+    if(Math.hypot(player.x-p.x,player.z-p.z)<1.8 && Math.abs(player.speed)>3){
+      p.alive=false; p.vy=6; p.vx=Math.sin(player.angle)*player.speed*0.4; p.vz=Math.cos(player.angle)*player.speed*0.4;
+      hits++; setWanted(wanted+1); show('🚨 Police alertée !',1.5);
+      setTimeout(()=>respawnPed(p),20000);
+    }
+  }
+  player.mesh.position.set(player.x,0,player.z); player.mesh.rotation.y=player.angle;
+}
+function respawnPed(p){ p.alive=true; p.g.rotation.x=0; p.vy=0; p.g.position.y=0; pickTarget(p,true); }
+
+// ---------- HUD ----------
+const $=id=>document.getElementById(id);
+let msgTimer=0;
+function show(html,t=0){ $('msg').innerHTML=html; msgTimer=t; }
+function reset(){
+  clearPolice(); busted=false; bustTimer=0; hits=0;
+  player.x=roadCenters[1]+3.5; player.z=roadCenters[3]+10; player.angle=Math.PI; player.speed=0; show('');
+}
+
+// ---------- Siren audio ----------
+let actx, osc, gain, audioOn=true;
+function initAudio(){ if(actx) return; actx=new AudioContext(); osc=actx.createOscillator(); gain=actx.createGain(); osc.type='sawtooth'; osc.connect(gain); gain.connect(actx.destination); gain.gain.value=0; osc.start(); }
+addEventListener('keydown',initAudio,{once:true});
+function audioToggle(){audioOn=!audioOn;}
+
+// ---------- Loop ----------
+const clock=new THREE.Clock(); let time=0;
+const camPos=new THREE.Vector3();
+function loop(){
+  const dt=Math.min(clock.getDelta(),0.05); time+=dt;
+  updateLights(dt); updatePlayer(dt); updateTraffic(dt); updatePeds(dt); updatePolice(dt,time);
+  if(wanted>0 && !busted){
+    // lose cops if far away from all of them
+    const far=police.every(c=>Math.hypot(player.x-c.x,player.z-c.z)>90);
+    wantedCool -= dt*(far?3:0.4);
+    if(wantedCool<=0){ clearPolice(); show('Tu as semé la police 😎',2); }
+  }
+  if(msgTimer>0){ msgTimer-=dt; if(msgTimer<=0) show(''); }
+  // camera
+  const back = camMode===0 ? 11 : 0.2, height = camMode===0 ? 4.5 : 1.9;
+  const tgt=new THREE.Vector3(player.x-Math.sin(player.angle)*back, height, player.z-Math.cos(player.angle)*back);
+  camPos.lerp(tgt, camMode===0?Math.min(1,dt*5):1);
+  camera.position.copy(camPos);
+  camera.lookAt(player.x+Math.sin(player.angle)*(camMode?20:4), camMode?1.6:1.5, player.z+Math.cos(player.angle)*(camMode?20:4));
+  sun.position.set(player.x+80,140,player.z+40); sun.target.position.set(player.x,0,player.z);
+  // HUD
+  $('speed').textContent=Math.round(Math.abs(player.speed)*3.6)+' km/h';
+  $('stars').textContent='★'.repeat(wanted)+'☆'.repeat(5-wanted);
+  $('info').textContent = hits?`Piétons percutés : ${hits}`:'';
+  const flash = wanted>0 && Math.floor(time*4)%2===0;
+  $('siren').style.boxShadow = wanted>0 ? `inset 0 0 80px 10px ${flash?'rgba(255,0,0,.5)':'rgba(0,60,255,.5)'}` : 'none';
+  if(gain){ const near=police.length&&audioOn&&!busted; gain.gain.value=near?0.04:0; osc.frequency.value=650+Math.sin(time*5)*250; }
+  renderer.render(scene,camera);
+  requestAnimationFrame(loop);
+}
+camPos.set(player.x,5,player.z+10);
+show('Bienvenue à Dakar 🇸🇳<br><span style="font-size:20px">Respecte les feux… ou pas</span>',3);
+loop();
+</script>
+</body>
+</html>

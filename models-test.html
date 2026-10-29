@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Model test</title>
+<style>body{margin:0;background:#888}#l{position:fixed;top:0;left:0;color:#fff;font:12px monospace;white-space:pre;background:#0008}</style></head><body><div id="l"></div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const r=new THREE.WebGLRenderer({antialias:true});r.setSize(innerWidth,innerHeight);document.body.appendChild(r.domElement);
+const s=new THREE.Scene();s.background=new THREE.Color(0x9ab);
+s.environment=new THREE.PMREMGenerator(r).fromScene(new RoomEnvironment()).texture;
+s.add(new THREE.DirectionalLight(0xffffff,2).translateY(10).translateX(5));
+const names=(new URLSearchParams(location.search).get('n')||'ferrari,audis4,etron,bmwe30,peugeot405,corolla,pickup404,carrapide,carrapide2,police').split(',');
+const cam=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,0.1,500);window.cam=cam;window.look=i=>{cam.position.set(i*5.5+5,2.2,6);cam.lookAt(i*5.5,0.6,0);};
+const view=new URLSearchParams(location.search).get('v')||'side';
+if(view==='top'){cam.position.set(25,60,0.01);}else{cam.position.set(25,6,-28);} cam.lookAt(25,0,0);
+// arrow showing +z direction
+const L=new GLTFLoader();const DL=new DRACOLoader();DL.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/gltf/');L.setDRACOLoader(DL);let log='';
+for(let i=0;i<names.length;i++){
+  const g=await L.loadAsync('models/'+names[i]+'.glb');const m=g.scene;
+  const b=new THREE.Box3().setFromObject(m);const sz=b.getSize(new THREE.Vector3());
+  const pivot=new THREE.Group();pivot.add(m);
+  if(sz.x>sz.z) m.rotation.y=Math.PI/2;
+  m.updateMatrixWorld(true);const b2=new THREE.Box3().setFromObject(pivot);const s2=b2.getSize(new THREE.Vector3());
+  const sc=4.5/Math.max(s2.x,s2.z);pivot.scale.setScalar(sc);
+  const c=b2.getCenter(new THREE.Vector3());m.position.sub(new THREE.Vector3(c.x,b2.min.y,c.z));
+  pivot.position.set(i*5.5,0,0);s.add(pivot);
+  const ar=new THREE.ArrowHelper(new THREE.Vector3(0,0,1),new THREE.Vector3(i*5.5,3,0),3,0xff0000);s.add(ar);
+  const mats=new Set();m.traverse(o=>{if(o.isMesh)mats.add(o.material.name)});
+  log+=`${i} ${names[i]} raw ${sz.x.toFixed(1)}x${sz.y.toFixed(1)}x${sz.z.toFixed(1)}\n`;
+}
+document.getElementById('l').textContent=log+'red arrow = +Z';
+r.setAnimationLoop(()=>r.render(s,cam));
+</script></body></html>

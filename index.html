@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dakar Open World</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{--hud:#fff;--accent:#f2c230;--wd:#c8f7ff}
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:Inter,system-ui,sans-serif;color:#fff;user-select:none}
+  canvas#game{display:block}
+  .hud{position:fixed;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  /* GTA-style wanted stars */
+  #stars{top:18px;right:24px;font-size:34px;letter-spacing:4px;font-family:Oswald}
+  #stars .on{color:#fff}#stars .off{color:rgba(255,255,255,.18)}
+  #stars.flash .on{animation:fl .5s steps(2) infinite}
+  @keyframes fl{50%{color:rgba(255,255,255,.25)}}
+  #topinfo{top:62px;right:24px;text-align:right;font:600 14px Inter;opacity:.9}
+  /* minimap */
+  #mapwrap{left:22px;bottom:22px;width:300px}
+  #minimap{width:300px;height:200px;border-radius:10px;border:2px solid rgba(0,0,0,.6);box-shadow:0 4px 18px rgba(0,0,0,.5);display:block}
+  #bars{display:flex;gap:4px;margin-top:5px}
+  #bars div{height:7px;border-radius:2px;background:rgba(0,0,0,.5);overflow:hidden;flex:1}
+  #bars i{display:block;height:100%}
+  #hp i{background:#5fb94a}#nitro i{background:linear-gradient(90deg,#2f6bff,#7fd0ff)}#bat i{background:var(--wd)}
+  #street{margin-top:7px;font:700 19px Oswald;letter-spacing:.5px;text-transform:uppercase}
+  #district{font:600 13px Inter;opacity:.85}
+  /* speedo */
+  #speedo{right:28px;bottom:26px;text-align:right;font-family:Oswald}
+  #speedo b{font-size:64px;line-height:1}#speedo span{font-size:16px;opacity:.8;margin-left:4px}
+  #carname{font:600 13px Inter;opacity:.8}
+  /* center messages */
+  #big{top:36%;left:0;right:0;text-align:center;font:700 64px Oswald;letter-spacing:2px;opacity:0;transition:opacity .4s}
+  #big small{display:block;font:400 18px Inter;letter-spacing:0;margin-top:6px}
+  #toast{top:22px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.72);padding:10px 18px;border-radius:6px;font:600 15px Inter;opacity:0;transition:opacity .3s;max-width:70vw;text-align:center}
+  /* watch dogs hack prompt */
+  #hackui{position:fixed;pointer-events:none;font:700 13px Inter;color:var(--wd);text-shadow:0 0 6px rgba(0,200,255,.8);transform:translate(-50%,-120%);white-space:nowrap;display:none}
+  #hackui .k{display:inline-block;border:1.5px solid var(--wd);padding:1px 6px;margin-right:6px;border-radius:3px}
+  #hackui:before{content:"";position:absolute;left:50%;top:100%;width:16px;height:16px;margin:6px 0 0 -9px;border:2px solid var(--wd);transform:rotate(45deg)}
+  #hackline{position:fixed;inset:0;pointer-events:none}
+  #money{top:96px;right:24px;font:700 26px Oswald;color:#7fe08a}
+  #mission{top:18px;left:22px;max-width:380px;background:rgba(0,0,0,.55);padding:10px 14px;border-radius:6px;font:400 14px Inter;line-height:1.45}
+  #mission b{font-weight:600}#mission small{opacity:.75}
+  #subs{left:50%;bottom:64px;transform:translateX(-50%);font:600 18px Inter;background:rgba(0,0,0,.6);padding:8px 16px;border-radius:6px;opacity:0;transition:opacity .3s;max-width:80vw;text-align:center}
+  #subs b{color:#f2c230;margin-right:6px}
+  #storycard{position:fixed;inset:0;z-index:8;display:none;align-items:center;justify-content:center;background:rgba(5,8,12,.82)}
+  #storycard>div{max-width:620px;padding:32px;margin:16px;background:#111;border-left:4px solid #f2c230}
+  #storycard h2{font:700 34px Oswald;margin:0 0 12px}#storycard p{line-height:1.6;opacity:.9}#storycard .m{color:#7fe08a;font-weight:600}
+  #storycard button{margin-top:10px;background:#f2c230;border:0;font:700 18px Oswald;padding:10px 26px;cursor:pointer}
+  #clock{top:130px;right:24px;font:600 18px Oswald;text-align:right}#clock span{display:block;color:#ff6b4a;font-size:13px;letter-spacing:1px}
+  #poicard{top:170px;right:24px;width:330px;background:rgba(10,14,18,.86);border-left:4px solid #4fb3ff;padding:14px 16px;border-radius:4px;opacity:0;transform:translateX(30px);transition:all .4s;text-shadow:none}
+  #poicard small{color:#4fb3ff;font-weight:600;letter-spacing:1px}#poicard h3{font:700 22px Oswald;margin:4px 0 6px}#poicard p{font-size:14px;line-height:1.5;margin:0 0 8px;opacity:.92}
+  #poicard .w{font-size:13px;color:#f2c230}
+  #help{left:50%;bottom:14px;transform:translateX(-50%);font-size:12px;opacity:.75;text-align:center}
+  #siren{position:fixed;inset:0;pointer-events:none}
+  /* loading */
+  #loading{position:fixed;inset:0;background:#0b0b0d url() center/cover;display:flex;flex-direction:column;justify-content:flex-end;padding:48px;z-index:10}
+  #loading h1{font:700 76px Oswald;margin:0;letter-spacing:3px;background:linear-gradient(90deg,#00853f,#fdef42,#e31b23);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #loading p{margin:6px 0 18px;opacity:.75}
+  #prog{width:min(520px,80vw);height:4px;background:#222}#prog i{display:block;height:100%;width:0;background:#fff;transition:width .2s}
+  #start{margin-top:20px;display:none;background:#fff;color:#000;border:0;font:700 18px Oswald;padding:12px 28px;letter-spacing:1px;cursor:pointer;width:max-content}
+  /* full map */
+  #fullmap{position:fixed;inset:0;background:#10161d;display:none;z-index:5;cursor:grab}
+  #fullmap canvas{width:100%;height:100%}
+  #fullmap .legend{position:absolute;top:18px;left:22px;font:600 14px Inter;background:rgba(0,0,0,.55);padding:10px 14px;border-radius:6px;line-height:1.6}
+  @media (max-width:700px){#mapwrap{width:200px}#minimap{width:200px;height:140px}#speedo b{font-size:42px}#loading h1{font-size:44px}}
+  /* touch controls (phones / tablets) */
+  #touchpad{display:none}
+  body.touch #touchpad{display:block;position:fixed;inset:0;pointer-events:none;z-index:20}
+  .tbtn{pointer-events:auto;position:absolute;border:2px solid rgba(255,255,255,.35);background:rgba(0,0,0,.35);color:#fff;font:700 13px Oswald;border-radius:50%;touch-action:none;-webkit-tap-highlight-color:transparent}
+  .tbtn.on{background:rgba(242,194,48,.55)}
+  #tl,#tr{bottom:24px;width:86px;height:86px;font-size:28px}#tl{left:18px}#tr{left:116px}
+  #tg{right:18px;bottom:24px;width:96px;height:96px;background:rgba(40,160,70,.4)}
+  #tb{right:124px;bottom:18px;width:76px;height:76px;background:rgba(200,50,40,.4)}
+  #tn{right:30px;bottom:132px;width:70px;height:70px;background:rgba(47,107,255,.45)}
+  #th{right:116px;bottom:108px;width:64px;height:64px;font-size:10px}
+  #tact{position:absolute;top:8px;left:50%;transform:translateX(-50%);display:flex;gap:6px}
+  #tact .tbtn{position:static;width:40px;height:40px;font-size:18px;border-radius:10px}
+  body.touch #help{display:none}
+  body.touch #speedo{bottom:auto;top:120px;transform:scale(.6);transform-origin:right top}
+  body.touch #mapwrap{transform:scale(.55);transform-origin:left top;top:58px;bottom:auto;left:8px}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="siren"></div>
+<canvas id="hackline"></canvas>
+
+<div class="hud" id="stars"></div>
+<div class="hud" id="topinfo"></div>
+<div class="hud" id="money"></div>
+<div class="hud" id="clock"></div>
+<div class="hud" id="mission"></div>
+<div class="hud" id="subs"></div>
+<div id="storycard"></div>
+<div class="hud" id="poicard"></div>
+<div class="hud" id="mapwrap">
+  <canvas id="minimap" width="600" height="400"></canvas>
+  <div id="bars"><div id="hp"><i style="width:100%"></i></div><div id="bat"><i style="width:100%"></i></div><div id="nitro"><i style="width:100%"></i></div></div>
+  <div id="street"></div>
+  <div id="district"></div>
+</div>
+<div class="hud" id="speedo"><div id="carname"></div><b id="kmh">0</b><span>KM/H</span></div>
+<div class="hud" id="big"></div>
+<div class="hud" id="toast"></div>
+<div id="hackui"></div>
+<div class="hud" id="help">ZQSD / Flèches conduire · Espace frein à main · Maj nitro · E pirater un feu · F pirater un véhicule · G blackout · T service on/off · J voyage rapide · Y radio · M carte · C caméra · N jour/nuit · V changer de voiture · H klaxon · 1 Dakar · 2 Diourbel · 3 Touba · R réapparaître · P qualité</div>
+
+<div id="fullmap"><canvas id="fullcanvas"></canvas>
+  <div class="legend">CARTE — Dakar · Diourbel · Touba<br>Molette : zoom · Glisser : déplacer<br>Clic : placer un repère GPS · Double-clic : s'y téléporter<br>Points bleus « i » : lieux à découvrir (verts = déjà vus)<br>M ou Échap : fermer</div>
+</div>
+
+<div id="loading">
+  <h1>DAKAR OPEN WORLD</h1>
+  <p id="loadtxt">Chargement de la carte réelle (OpenStreetMap)…</p>
+  <div id="prog"><i></i></div>
+  <button id="start">JOUER</button>
+</div>
+
+<script src="data.js?v=14"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module" src="game.js?v=30"></script>
+</body>
+</html>
