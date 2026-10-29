@@ -70,6 +70,65 @@ roads.forEach((r, ri) => {
   }
 });
 
+// ---------------- Ponts & rampes ----------------
+// OSM bridges (tools/bridges.mjs -> bridges.js) lift their road: ~7 m per layer over a road or a railway, a little
+// over a canal. The height then runs down every connected road at 6 % (the approach embankments), so each road
+// gets r.y[] per vertex (0 elsewhere). Roads passing underneath share no node with the bridge: they stay down.
+const DECK = 6.8, SLOPE = 0.06;
+{
+  const vkey = (x, z) => Math.round(x) * 1e6 + Math.round(z); // data.js coordinates are whole metres
+  const atV = new Map(), byEnds = new Map();
+  roads.forEach((r, ri) => {
+    r.y = null;
+    r.pts.forEach(([x, z], i) => { if (Number.isInteger(x) && Number.isInteger(z)) { const k = vkey(x, z); let a = atV.get(k); if (!a) atV.set(k, a = []); a.push(ri, i); } });
+    const a = vkey(...r.pts[0]), b = vkey(...r.pts.at(-1)); byEnds.set(a + ':' + b, ri); byEnds.set(b + ':' + a, ri);
+  });
+  const heap = []; // max-heap of [h, ri, i, dx, dz] (dx,dz = direction the ramp is running, away from the bridge)
+  const push = e => { heap.push(e); let i = heap.length - 1; while (i) { const p = (i - 1) >> 1; if (heap[p][0] >= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] > heap[m][0]) m = l; if (r < heap.length && heap[r][0] > heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+  const raise = (ri, i, h, dx = 0, dz = 0) => { const r = roads[ri]; if (!r.y) r.y = new Float32Array(r.pts.length); if (h > r.y[i] + 0.01) { r.y[i] = h; push([h, ri, i, dx, dz]); } };
+  const ahead = (dx, dz, ex, ez) => { const l = Math.hypot(ex, ez) || 1; return !dx && !dz || (dx * ex + dz * ez) / l > 0.76; }; // within ~40 deg
+  for (const [layer, over, x0, z0, x1, z1] of (window.BRIDGES || [])) {
+    const ri = byEnds.get(vkey(x0, z0) + ':' + vkey(x1, z1)); if (ri === undefined) continue;
+    const r = roads[ri], h = over ? DECK * Math.min(layer, 2) : 0.7, n = r.pts.length; r.bridge = h;
+    const out = (i, j) => { const ex = r.pts[i][0] - r.pts[j][0], ez = r.pts[i][1] - r.pts[j][1], l = Math.hypot(ex, ez) || 1; return [ex / l, ez / l]; };
+    r.pts.forEach((_, i) => raise(ri, i, h, ...(i === 0 ? out(0, 1) : i === n - 1 ? out(n - 1, n - 2) : [0, 0])));
+  }
+  // the ramp only runs on along the road that carries straight on from the bridge, not into every side street
+  while (heap.length) {
+    const [h, ri, i, dx, dz] = pop(), r = roads[ri]; if (h < r.y[i] - 0.01) continue;
+    const [x, z] = r.pts[i];
+    for (const j of [i - 1, i + 1]) if (j >= 0 && j < r.pts.length) { const ex = r.pts[j][0] - x, ez = r.pts[j][1] - z, l = Math.hypot(ex, ez) || 1;
+      if (r.bridge || ahead(dx, dz, ex, ez)) raise(ri, j, h - SLOPE * Math.abs(r.cum[j] - r.cum[i]), ex / l, ez / l); }
+    if ((dx || dz) && Number.isInteger(x) && Number.isInteger(z)) { const o = atV.get(vkey(x, z));
+      for (let k = 0; k < o.length; k += 2) { if (o[k] === ri) continue; const q = roads[o[k]], kk = o[k + 1];
+        for (const j of [kk - 1, kk + 1]) if (j >= 0 && j < q.pts.length) { const ex = q.pts[j][0] - x, ez = q.pts[j][1] - z, l = Math.hypot(ex, ez) || 1;
+          if (ahead(dx, dz, ex, ez)) raise(o[k], j, h - SLOPE * Math.abs(q.cum[j] - q.cum[kk]), ex / l, ez / l); }
+        if (q.y && q.y[kk] < h) q.y[kk] = Math.max(q.y[kk], h - 0.01); } }
+  }
+  roads.forEach(r => { if (r.y && !r.y.some(v => v > 0.05)) r.y = null; });
+  // where other roads join a motorway (slip roads), so the guard rail can leave the gap
+  roads.forEach((r, ri) => { if (r.t !== 0) return; r.jcum = []; r.pts.forEach(([x, z], i) => { const o = Number.isInteger(x) && Number.isInteger(z) && atV.get(vkey(x, z)); if (o && o.length > 2) r.jcum.push(r.cum[i]); }); });
+}
+const segLift = (r, i, t) => r.y ? r.y[i] + (r.y[i + 1] - r.y[i]) * t : 0;
+// drivable height under (x,z) for something currently at height y0: the bridge deck or ramp within reach,
+// else the terrain. surfHit keeps the road segment found (used to hold cars on the deck).
+let surfHit = null;
+function surfaceY(x, z, y0 = 0) {
+  surfHit = null; let best = -1; const gx = cellOf(x), gz = cellOf(z);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+    const s = segGrid.get(ckey(gx + a, gz + b)); if (!s) continue;
+    for (let j = 0; j < s.length; j += 2) {
+      const r = roads[s[j]]; if (!r.y) continue; const i = s[j + 1];
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
+      const t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1), d = Math.hypot(x - ax - dx * t, z - az - dz * t);
+      if (d > r.w / 2 + 0.3) continue;
+      const hy = segLift(r, i, t); if (hy > 0.05 && Math.abs(hy - y0) < 2.4 && hy > best) { best = hy; surfHit = { r, i, t, hy }; }
+    }
+  }
+  return best >= 0 ? best + 0.16 : groundY(x, z);
+}
+
 // how far (x,z) sits inside the nearest road+sidewalk band (>0 = overlapping), with outward push direction
 function roadOverlap(x, z, margin = 0.4) {
   let worst = 0, px = 0, pz = 0; const gx = cellOf(x), gz = cellOf(z);
@@ -427,6 +486,7 @@ const glassTex = canvasTex(512, 512, (g) => {
 });
 const glassBldMat = new THREE.MeshStandardMaterial({ map: glassTex, vertexColors: true, roughness: 0.2, metalness: 0.55, emissiveMap: litTex, emissive: 0xffffff, emissiveIntensity: 0 });
 glassBldMat.userData.nightI = 1.2; nightMats.push(glassBldMat);
+const concreteMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
 const lampMat = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0xffd9a0, emissiveIntensity: 0 }); lampMat.userData.nightI = 6; nightMats.push(lampMat);
 const poleMat = new THREE.MeshStandardMaterial({ color: 0x777b80, roughness: 0.5, metalness: 0.6 });
 const glowMat = new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 });
@@ -575,15 +635,66 @@ function sandEdge(E, pts, cum, i, o0, o1, y) {
     for (const k of (s > 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2])) E.push([...q[k], y]);
   }
 }
-function ribbon(pos, col, uv, pts, i0, i1, half, y, color) {
-  // emits quads for segments i0..i1-1 of polyline pts with mitered normals
+function ribbon(pos, col, uv, pts, i0, i1, half, y, color, ys) {
+  // emits quads for segments i0..i1-1 of polyline pts with mitered normals; ys = optional lift per point (bridges)
   const n = pts.length;
   const norm = i => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)]; let dx = b[0] - a[0], dz = b[1] - a[1]; const L = Math.hypot(dx, dz) || 1; return [-dz / L, dx / L]; };
   for (let i = i0; i < i1; i++) {
     const [ax, az] = pts[i], [bx, bz] = pts[i + 1], na = norm(i), nb = norm(i + 1);
     const v = [[ax + na[0] * half, az + na[1] * half], [ax - na[0] * half, az - na[1] * half], [bx - nb[0] * half, bz - nb[1] * half], [bx + nb[0] * half, bz + nb[1] * half]];
-    for (const k of [0, 1, 2, 0, 2, 3]) { pos.push(v[k][0], y, v[k][1]); uv.push(v[k][0] / 6, v[k][1] / 6); col.push(color.r, color.g, color.b); }
+    const ya = y + (ys ? ys[i] : 0), yb = y + (ys ? ys[i + 1] : 0);
+    for (const k of [0, 1, 2, 0, 2, 3]) { pos.push(v[k][0], k < 2 ? ya : yb, v[k][1]); uv.push(v[k][0] / 6, v[k][1] / 6); col.push(color.r, color.g, color.b); }
   }
+}
+// prism along a road segment: lateral offset o, half width hw, top/bottom heights at each end (sloped decks and ramps)
+function prism(B, ax, az, bx, bz, o, hw, ta, tb, ba, bb, colHex) {
+  const L = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux, c = new THREE.Color(colHex);
+  const P = (x, z, s, y) => [x + nx * (o + s * hw), y, z + nz * (o + s * hw)];
+  const A0 = P(ax, az, -1, ba), A1 = P(ax, az, 1, ba), A2 = P(ax, az, 1, ta), A3 = P(ax, az, -1, ta), B0 = P(bx, bz, -1, bb), B1 = P(bx, bz, 1, bb), B2 = P(bx, bz, 1, tb), B3 = P(bx, bz, -1, tb);
+  const quad = (p, q, r, s) => { const e1 = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], e2 = [s[0] - p[0], s[1] - p[1], s[2] - p[2]]; let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; const l = Math.hypot(...n) || 1; n = n.map(v => v / l);
+    for (const v of [p, q, r, p, r, s]) { B.pos.push(...v); B.nor.push(...n); B.uv.push(0.01, 0.01); B.col.push(c.r, c.g, c.b); } };
+  quad(A0, B0, B3, A3); quad(B1, A1, A2, B2); quad(A3, B3, B2, A2); quad(A1, B1, B0, A0); quad(A1, A0, A3, A2); quad(B0, B1, B2, B3);
+}
+function groundRoadNear(x, z, m) {
+  const gx = cellOf(x), gz = cellOf(z);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const s = segGrid.get(ckey(gx + a, gz + b)); if (!s) continue;
+    for (let j = 0; j < s.length; j += 2) { const r = roads[s[j]], i = s[j + 1]; if (r.t > 8 || (r.y && Math.max(r.y[i], r.y[i + 1]) > 0.05)) continue;
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1);
+      if (Math.hypot(x - ax - dx * t, z - az - dz * t) < r.w / 2 + m) return true; } }
+  return false;
+}
+// one elevated road segment: deck slab (or embankment wall near the ground), concrete parapets, pillars under the deck
+function bridgeSeg(BR, cols, r, i, y) {
+  const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], ya = y + r.y[i], yb = y + r.y[i + 1], hw = r.w / 2 + 0.35;
+  const bot = h => h > 3.4 ? h - 1.15 : 0; // high: slab 1.15 m thick; low: solid ramp down to the ground
+  prism(BR, ax, az, bx, bz, 0, hw, ya - 0.03, yb - 0.03, bot(ya), bot(yb), 0xc9c3b8);
+  for (const s of [1, -1]) prism(BR, ax, az, bx, bz, s * (hw - 0.17), 0.17, ya + 0.85, yb + 0.85, ya - 0.05, yb - 0.05, 0xe2ddd3);
+  const L = r.cum[i + 1] - r.cum[i], ux = (bx - ax) / (L || 1), uz = (bz - az) / (L || 1);
+  for (let d = (30 - (r.cum[i] % 30)) % 30; d < L; d += 30) {
+    const h = ya + (yb - ya) * d / L; if (h < 4) continue;
+    const x = ax + ux * d, z = az + uz * d, top = h - 1.15, pw = Math.min(r.w * 0.45, 4);
+    if (groundRoadNear(x, z, pw / 2 + 1.5)) continue; // never on the carriageway passing underneath
+    prism(BR, x - ux * 0.7, z - uz * 0.7, x + ux * 0.7, z + uz * 0.7, 0, pw / 2, top, top, 0, 0, 0xbdb7ab);
+    prism(BR, x - ux * 0.9, z - uz * 0.9, x + ux * 0.9, z + uz * 0.9, 0, hw - 0.6, top, top, top - 0.7, top - 0.7, 0xc4beb2); // chevetre
+    const px = -uz * pw / 2, pz = ux * pw / 2, p = [[x - ux * 0.7 + px, z - uz * 0.7 + pz], [x + ux * 0.7 + px, z + uz * 0.7 + pz], [x + ux * 0.7 - px, z + uz * 0.7 - pz], [x - ux * 0.7 - px, z - uz * 0.7 - pz]];
+    cols.push({ pts: p, top, minx: Math.min(...p.map(q => q[0])), maxx: Math.max(...p.map(q => q[0])), minz: Math.min(...p.map(q => q[1])), maxz: Math.max(...p.map(q => q[1])) });
+  }
+}
+// autoroute : each carriageway is its own one-way OSM road (traffic keeps right), so the median is on its left:
+// a white New Jersey concrete barrier there, a steel guard rail on posts along the right shoulder
+function motorwayEdges(BR, cols, r, i, y) {
+  const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = r.cum[i + 1] - r.cum[i]; if (L < 0.5) return;
+  const ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux, ml = -(r.w / 2 + 0.45), gr = r.w / 2 + 0.7;
+  prism(BR, ax, az, bx, bz, ml, 0.32, y + 0.25, y + 0.25, 0, 0, 0xd6d2c8); prism(BR, ax, az, bx, bz, ml, 0.13, y + 0.85, y + 0.85, y + 0.25, y + 0.25, 0xe4e0d7);
+  const c0 = r.cum[i], c1 = r.cum[i + 1];
+  if (r.jcum.some(j => j > c0 - 70 && j < c1 + 70)) { return addMedianCol(cols, ax, az, bx, bz, nx, nz, ml); }
+  prism(BR, ax, az, bx, bz, gr, 0.04, y + 0.78, y + 0.78, y + 0.45, y + 0.45, 0xaab0b5);
+  for (let d = (4 - (r.cum[i] % 4)) % 4; d < L; d += 4) { const x = ax + ux * d + nx * (gr + 0.12), z = az + uz * d + nz * (gr + 0.12); prism(BR, x - ux * 0.06, z - uz * 0.06, x + ux * 0.06, z + uz * 0.06, 0, 0.06, y + 0.75, y + 0.75, 0, 0, 0x8d9398); }
+  addMedianCol(cols, ax, az, bx, bz, nx, nz, ml); addMedianCol(cols, ax, az, bx, bz, nx, nz, gr);
+}
+function addMedianCol(cols, ax, az, bx, bz, nx, nz, o) {
+  const p = [[ax + nx * (o - 0.3), az + nz * (o - 0.3)], [bx + nx * (o - 0.3), bz + nz * (o - 0.3)], [bx + nx * (o + 0.3), bz + nz * (o + 0.3)], [ax + nx * (o + 0.3), az + nz * (o + 0.3)]];
+  cols.push({ pts: p, top: 0.9, minx: Math.min(...p.map(q => q[0])), maxx: Math.max(...p.map(q => q[0])), minz: Math.min(...p.map(q => q[1])), maxz: Math.max(...p.map(q => q[1])) });
 }
 function addBuilding(B, pts, h, colHex, roofHex, shops = false) {
   let area = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; area += x1 * z2 - x2 * z1; }
@@ -704,7 +815,7 @@ function groundY(x, z) {
 }
 function buildChunk(gx, gz) {
   const k = ckey(gx, gz), group = new THREE.Group(), cols = [];
-  const R = { pos: [], col: [], uv: [] }, S = { pos: [], col: [], uv: [] }, M = { pos: [], col: [], uv: [] }, SE = [];
+  const R = { pos: [], col: [], uv: [] }, S = { pos: [], col: [], uv: [] }, M = { pos: [], col: [], uv: [] }, SE = [], BR = { pos: [], nor: [], uv: [], col: [] };
   const segs = segGrid.get(k) || [];
   const lamps = [], palms = [], neems = [];
   const sandy = new THREE.Color(0xcfae80), aspA = new THREE.Color(0xd4d2ce), aspB = new THREE.Color(0xe0dbd2), aspC = new THREE.Color(0xc4c4c8), side = new THREE.Color(0xc4b8a2), white = new THREE.Color(1, 1, 1);
@@ -717,28 +828,31 @@ function buildChunk(gx, gz) {
     const dirt = (r.t >= 5 && r.t <= 9 && outsideDakar(r.pts[0][0])) || r.t === 9;
     const color = dirt ? sandy : r.t <= 1 ? aspC : r.t <= 4 ? aspA : aspB;
     for (const i of list) {
-      ribbon(R.pos, R.col, R.uv, r.pts, i, i + 1, r.w / 2, y, color);
-      if (!dirt && r.t >= 1 && r.t <= 8) { const sw = r.t <= 2 ? 0.7 : r.t <= 4 ? 1.3 : rand(1.4, 2.4); sandEdge(SE, r.pts, r.cum, i, r.w / 2 + 0.05, Math.max(0.6, r.w / 2 - sw), y + 0.01); }
-      if (r.side > 0.5 && !dirt) ribbon(S.pos, S.col, S.uv, r.pts, i, i + 1, r.w / 2 + r.side, 0.1, side);
+      const up = r.y && Math.max(r.y[i], r.y[i + 1]) > 0.05;
+      ribbon(R.pos, R.col, R.uv, r.pts, i, i + 1, r.w / 2, y, color, r.y);
+      if (up) bridgeSeg(BR, cols, r, i, y); // tablier / rampe : garde-corps et piliers, pas de trottoir ni de sable
+      else if (r.t === 0 && r.ow) motorwayEdges(BR, cols, r, i, y);
+      if (!up && !dirt && r.t >= 1 && r.t <= 8) { const sw = r.t <= 2 ? 0.7 : r.t <= 4 ? 1.3 : rand(1.4, 2.4); sandEdge(SE, r.pts, r.cum, i, r.w / 2 + 0.05, Math.max(0.6, r.w / 2 - sw), y + 0.01); }
+      if (!up && r.side > 0.5 && !dirt) ribbon(S.pos, S.col, S.uv, r.pts, i, i + 1, r.w / 2 + r.side, 0.1, side);
       // markings
       if (r.t <= 4 && !dirt) {
         const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / L, uz = (bz - az) / L;
-        const start = r.cum[i];
+        const start = r.cum[i], la = r.y ? r.y[i] : 0, lb = r.y ? r.y[i + 1] : 0, lift = d => [la + (lb - la) * d[0] / L, la + (lb - la) * d[1] / L];
         for (let d = Math.ceil(start / 10) * 10 - start; d < L; d += 10) {
           const e = Math.min(d + 4, L), p0 = [ax + ux * d, az + uz * d], p1 = [ax + ux * e, az + uz * e];
-          if (!r.ow) ribbon(M.pos, M.col, M.uv, [p0, p1], 0, 1, 0.08, y + 0.02, white);
-          else if (r.w > 7) ribbon(M.pos, M.col, M.uv, [[p0[0] - uz * 0.1, p0[1] + ux * 0.1], [p1[0] - uz * 0.1, p1[1] + ux * 0.1]], 0, 1, 0.07, y + 0.02, white);
+          if (!r.ow) ribbon(M.pos, M.col, M.uv, [p0, p1], 0, 1, 0.08, y + 0.02, white, lift([d, e]));
+          else if (r.w > 7) ribbon(M.pos, M.col, M.uv, [[p0[0] - uz * 0.1, p0[1] + ux * 0.1], [p1[0] - uz * 0.1, p1[1] + ux * 0.1]], 0, 1, 0.07, y + 0.02, white, lift([d, e]));
         }
-        if (r.t <= 1) for (const s of [1, -1]) { const o = r.w / 2 - 0.4; ribbon(M.pos, M.col, M.uv, [[ax - uz * o * s, az + ux * o * s], [bx - uz * o * s, bz + ux * o * s]], 0, 1, 0.09, y + 0.02, white); }
+        if (r.t <= 1) for (const s of [1, -1]) { const o = r.w / 2 - 0.4; ribbon(M.pos, M.col, M.uv, [[ax - uz * o * s, az + ux * o * s], [bx - uz * o * s, bz + ux * o * s]], 0, 1, 0.09, y + 0.02, white, [la, lb]); }
       }
       // props along segment
-      if (r.t <= 3 && Math.random() < 0.55) {
+      if (!up && r.t <= 3 && Math.random() < 0.55) {
         const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], f = Math.random(), x = ax + (bx - ax) * f, z = az + (bz - az) * f, h = Math.atan2(bx - ax, bz - az), s = Math.random() < 0.5 ? 1 : -1, off = r.w / 2 + Math.max(0.6, r.side - 0.5);
         const px = x - Math.cos(h) * off * s, pz = z + Math.sin(h) * off * s;
         if (!isWater(px, pz)) lamps.push([px, pz, h + (s > 0 ? Math.PI / 2 : -Math.PI / 2)]);
         if (!outsideDakar(x) && Math.random() < 0.5) { const qx = x + Math.cos(h) * (off + 1.5) * s, qz = z - Math.sin(h) * (off + 1.5) * s; const q = clearOfRoads(qx, qz, -1.2); if (q && !isWater(q[0], q[1])) palms.push(q); }
       }
-      if (r.t >= 3 && r.t <= 7 && Math.random() < (outsideDakar(r.pts[i][0]) ? 0.3 : 0.22)) {
+      if (!up && r.t >= 3 && r.t <= 7 && Math.random() < (outsideDakar(r.pts[i][0]) ? 0.3 : 0.22)) {
         const [ax, az] = r.pts[i], s = Math.random() < 0.5 ? 1 : -1; const q = clearOfRoads(ax + s * (r.w / 2 + 4), az + rand(-5, 5), 2); if (q) neems.push(q);
       }
     }
@@ -812,6 +926,12 @@ function buildChunk(gx, gz) {
     g.setAttribute('position', new THREE.Float32BufferAttribute(B.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(B.nor, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(B.uv, 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(B.col, 3));
     const m = new THREE.Mesh(g, bldMat); m.castShadow = Q.bshadow; m.receiveShadow = Q.shadow > 0; group.add(m);
+  }
+  if (BR.pos.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(BR.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(BR.nor, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(BR.uv, 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(BR.col, 3));
+    const m = new THREE.Mesh(g, concreteMat); m.castShadow = true; m.receiveShadow = true; group.add(m);
   }
   if (GL.pos.length) {
     const g = new THREE.BufferGeometry();
@@ -1148,6 +1268,7 @@ function spawnAt(x, z) {
   const nr = nearestRoad(x, z, 3, r => r.t <= 6) || nearestRoad(x, z, 6);
   if (nr) { x = nr.x; z = nr.z; player.h = nr.h; }
   player.x = x; player.z = z; player.vx = player.vz = 0; player.hp = 100;
+  player.y = nr && nr.r.y ? segLift(nr.r, nr.i, nr.t) + 0.16 : undefined; player.deck = null;
   camPos.set(x - Math.sin(player.h) * 10, 5, z - Math.cos(player.h) * 10);
   updateChunks(x, z); processQueue(30);
   for (const c of traffic) removeCar(c); traffic.length = 0;
@@ -1181,12 +1302,12 @@ addEventListener('keyup', e => keys[e.code] = false);
 let camMode = 0;
 
 // ---------------- Collisions ----------------
-function collide(x, z, r) { // returns push vector or null
+function collide(x, z, r, y = 0) { // returns push vector or null; things with a `top` (bridge pillars) are passed over
   const gx = cellOf(x), gz = cellOf(z); let px = 0, pz = 0, hit = false;
   for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
     const cols = colliders.get(ckey(gx + a, gz + b)); if (!cols) continue;
     for (const c of cols) {
-      if (x + r < c.minx || x - r > c.maxx || z + r < c.minz || z - r > c.maxz) continue;
+      if (x + r < c.minx || x - r > c.maxx || z + r < c.minz || z - r > c.maxz || (c.top !== undefined && y > c.top - 0.5)) continue;
       const pts = c.pts; let bd = 1e9, bx = 0, bz = 0;
       for (let i = 0; i < pts.length; i++) { const [ax, az] = pts[i], [cx, cz] = pts[(i + 1) % pts.length], dx = cx - ax, dz = cz - az, L2 = dx * dx + dz * dz || 1; const t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1), qx = ax + dx * t, qz = az + dz * t, d = Math.hypot(x - qx, z - qz); if (d < bd) { bd = d; bx = qx; bz = qz; } }
       const inside = inPoly(x, z, pts);
@@ -1227,7 +1348,7 @@ function spawnTraffic() {
 function roadPoint(r, s) {
   let i = 1; while (i < r.cum.length - 1 && r.cum[i] < s) i++;
   const a = r.pts[i - 1], b = r.pts[i], L = (r.cum[i] - r.cum[i - 1]) || 1, t = clamp((s - r.cum[i - 1]) / L, 0, 1);
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, Math.atan2(b[0] - a[0], b[1] - a[1])];
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, Math.atan2(b[0] - a[0], b[1] - a[1]), segLift(r, i - 1, t)];
 }
 function nextRoad(c) {
   const p = c.dir > 0 ? c.r.pts[c.r.pts.length - 1] : c.r.pts[0];
@@ -1263,10 +1384,10 @@ function updateTraffic(dt) {
     c.speed += clamp(want - c.speed, -9 * dt, 4 * dt);
     c.s += c.dir * c.speed * dt;
     if (c.s > c.r.len || c.s < 0) { if (!nextRoad(c)) { removeCar(c); traffic.splice(ci, 1); continue; } }
-    const [x, z, hh] = roadPoint(c.r, c.s), h = c.dir > 0 ? hh : hh + Math.PI;
+    const [x, z, hh, ly] = roadPoint(c.r, c.s), h = c.dir > 0 ? hh : hh + Math.PI;
     c.h += angDiff(c.h, h) * Math.min(1, dt * 6);
-    c.x = x + Math.cos(h) * -c.lane * -1 * (c.r.ow ? 1 : 1) * 0 + (-Math.cos(h)) * c.lane; c.z = z + Math.sin(h) * c.lane;
-    c.mesh.position.set(c.x, 0, c.z); c.mesh.rotation.y = c.h;
+    c.x = x + Math.cos(h) * -c.lane * -1 * (c.r.ow ? 1 : 1) * 0 + (-Math.cos(h)) * c.lane; c.z = z + Math.sin(h) * c.lane; c.y = ly > 0.05 ? ly + 0.16 : 0;
+    c.mesh.position.set(c.x, c.y, c.z); c.mesh.rotation.y = c.h;
     setLOD(c.mesh, d > (qIdx ? 110 : 60));
   }
 }
@@ -1373,11 +1494,11 @@ function updateCops(dt) {
       c.v += (Math.abs(diff) > 1.2 && c.v > 15 ? -20 : 14) * dt; c.v = clamp(c.v, -6, vmax);
     }
     c.x += Math.sin(c.h) * c.v * dt; c.z += Math.cos(c.h) * c.v * dt;
-    const push = collide(c.x, c.z, 1.4); if (push) { c.x += push[0]; c.z += push[1]; c.v *= 0.6; c.stuck += dt; } else c.stuck = Math.max(0, c.stuck - dt);
+    const push = collide(c.x, c.z, 1.4, c.y || 0); if (push) { c.x += push[0]; c.z += push[1]; c.v *= 0.6; c.stuck += dt; } else c.stuck = Math.max(0, c.stuck - dt);
     if ((c.stuck > 2.5 || dist > 450) && dist > 60) { const i = cops.indexOf(c); removeCar(c); cops.splice(i, 1); spawnCop(); break; }
     // collision with player
     if (dist < 4) { const n = [dx / (dist || 1), dz / (dist || 1)]; player.vx += n[0] * 3; player.vz += n[1] * 3; c.v *= 0.5; player.hp -= 2 * dt * 10; }
-    c.mesh.position.set(c.x, 0, c.z); c.mesh.rotation.y = c.h; setLOD(c.mesh, dist > (qIdx ? 110 : 60));
+    c.y = surfaceY(c.x, c.z, c.y || 0); c.mesh.position.set(c.x, c.y, c.z); c.mesh.rotation.y = c.h; setLOD(c.mesh, dist > (qIdx ? 110 : 60));
     if (dist < 7 && Math.hypot(player.vx, player.vz) < 2.5) bustT += dt;
   }
   if (!cops.some(c => Math.hypot(player.x - c.x, player.z - c.z) < 8)) bustT = Math.max(0, bustT - dt);
@@ -1476,13 +1597,13 @@ function updatePlayer(dt) {
   player.x += player.vx * dt; player.z += player.vz * dt;
   // buildings
   for (const off of [1.5, -1.5]) {
-    const push = collide(player.x + nfx * off, player.z + nfz * off, 1.05);
+    const push = collide(player.x + nfx * off, player.z + nfz * off, 1.05, player.y || 0);
     if (push) { player.x += push[0]; player.z += push[1]; const L = Math.hypot(push[0], push[1]) || 1, nx = push[0] / L, nz = push[1] / L, dot = player.vx * nx + player.vz * nz; if (dot < 0) { const impact = -dot; player.vx -= 1.4 * dot * nx; player.vz -= 1.4 * dot * nz; player.vx *= 0.7; player.vz *= 0.7; if (impact > 6) { player.hp -= impact * 0.6; shake = Math.min(1, impact / 30); crash(impact); damageCar(player.x - nx * 2, player.z - nz * 2, impact); } } }
   }
   // cars
   for (const c of traffic.concat(cops)) {
     const dx = player.x - c.x, dz = player.z - c.z, d = Math.hypot(dx, dz), rr = (c.mesh.userData.cfg.len > 6 ? 3.6 : 2.4);
-    if (d < rr) {
+    if (d < rr && Math.abs((c.y || 0) - (player.y || 0)) < 3) { // not the car on the bridge above or below
       const nx = dx / (d || 1), nz = dz / (d || 1), pv = Math.hypot(player.vx, player.vz);
       player.x += nx * (rr - d); player.z += nz * (rr - d);
       const dot = player.vx * nx + player.vz * nz; if (dot < 0) { player.vx -= 1.3 * dot * nx; player.vz -= 1.3 * dot * nz; }
@@ -1491,12 +1612,21 @@ function updatePlayer(dt) {
     }
   }
   if (player.hp <= 0 && !busted) { busted = true; showBig('VÉHICULE DÉTRUIT<small>R pour réapparaître</small>'); clearWanted(); }
-  const gy = groundY(player.x, player.z); player.y = player.y === undefined ? gy : player.y + (gy - player.y) * Math.min(1, dt * 12);
+  let gy = surfaceY(player.x, player.z, player.y || 0);
+  if (!surfHit && player.deck && player.y > 1.2) { // garde-corps : the car rode off the side of a deck, put it back against the parapet
+    const { r, i } = player.deck, [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
+    const t = clamp(((player.x - ax) * dx + (player.z - az) * dz) / L2, 0, 1), qx = ax + dx * t, qz = az + dz * t, ox = player.x - qx, oz = player.z - qz, d = Math.hypot(ox, oz) || 1, lim = r.w / 2 - 1.1;
+    if (d > lim) { const nx = ox / d, nz = oz / d, dot = player.vx * nx + player.vz * nz; player.x = qx + nx * lim; player.z = qz + nz * lim;
+      if (dot > 0) { player.vx -= 1.5 * dot * nx; player.vz -= 1.5 * dot * nz; player.vx *= 0.8; player.vz *= 0.8; if (dot > 6) { crash(dot); shake = Math.min(1, dot / 30); player.hp -= dot * 0.4; } } }
+    gy = surfaceY(player.x, player.z, player.y);
+  }
+  player.deck = surfHit && surfHit.hy > 0.5 ? surfHit : null;
+  player.y = player.y === undefined ? gy : player.y + (gy - player.y) * Math.min(1, dt * 12);
   player.mesh.position.set(player.x, player.y, player.z); player.mesh.rotation.y = player.h;
-  { const fx = Math.sin(player.h), fz = Math.cos(player.h), pitch = Math.atan2(groundY(player.x + fx * 2, player.z + fz * 2) - groundY(player.x - fx * 2, player.z - fz * 2), 4); player.mesh.rotation.order = "YXZ"; player.mesh.rotation.x = -pitch; }
+  { const fx = Math.sin(player.h), fz = Math.cos(player.h), pitch = Math.atan2(surfaceY(player.x + fx * 2, player.z + fz * 2, player.y) - surfaceY(player.x - fx * 2, player.z - fz * 2, player.y), 4); surfaceY(player.x, player.z, player.y); player.mesh.rotation.order = "YXZ"; player.mesh.rotation.x = -pitch; }
   player.mesh.rotation.z = clamp(-vr * 0.012, -0.05, 0.05);
   // headlights
-  for (const [L, s] of [[headL, 0.7], [headR, -0.7]]) { L.position.set(player.x + nfx * 2.2 - nfz * s, 0.8, player.z + nfz * 2.2 + nfx * s); L.target.position.set(player.x + nfx * 30 - nfz * s * 3, 0, player.z + nfz * 30 + nfx * s * 3); }
+  for (const [L, s] of [[headL, 0.7], [headR, -0.7]]) { L.position.set(player.x + nfx * 2.2 - nfz * s, 0.8 + player.y, player.z + nfz * 2.2 + nfx * s); L.target.position.set(player.x + nfx * 30 - nfz * s * 3, player.y, player.z + nfz * 30 + nfx * s * 3); }
   return vf;
 }
 
@@ -1506,12 +1636,12 @@ function updateCamera(dt, vf) {
   const sp = Math.abs(vf), len = player.cfg.len;
   const back = [len * 1.6 + 3, len * 2.5 + 5, -0.4][camMode], height = [2.4 + len * 0.25, 5 + len * 0.4, 1.25][camMode];
   const fx = Math.sin(player.h), fz = Math.cos(player.h);
-  const tgt = new THREE.Vector3(player.x - fx * back, height, player.z - fz * back);
+  const py = player.y || 0, tgt = new THREE.Vector3(player.x - fx * back, height + py, player.z - fz * back);
   if (camMode === 2) camPos.copy(tgt); else camPos.lerp(tgt, Math.min(1, dt * 4.5));
   camera.position.copy(camPos);
   if (shake > 0) { camera.position.x += rand(-1, 1) * shake * 0.4; camera.position.y += rand(-1, 1) * shake * 0.3; shake = Math.max(0, shake - dt * 2); }
   camera.fov += ((62 + Math.min(18, sp * 0.25) + (boosting ? 12 : 0)) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
-  camera.lookAt(player.x + fx * (camMode === 2 ? 30 : 6), camMode === 2 ? 1.1 : 1.4, player.z + fz * (camMode === 2 ? 30 : 6));
+  camera.lookAt(player.x + fx * (camMode === 2 ? 30 : 6), (camMode === 2 ? 1.1 : 1.4) + py, player.z + fz * (camMode === 2 ? 30 : 6));
   sun.position.set(player.x + sunDir.x * 300, Math.max(30, sunDir.y * 300), player.z + sunDir.z * 300); sun.target.position.set(player.x, 0, player.z);
 }
 
