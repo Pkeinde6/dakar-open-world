@@ -27,11 +27,13 @@ const CITIES = { 1: { name: 'Dakar', p: ll(14.6687, -17.4325) }, 2: { name: 'Dio
 
 // ---------------- Decode roads ----------------
 //            mway trunk prim  sec  tert  resid uncl  living serv track link
-const WIDTH = [11,  11,   10,   9,   8,    6.5,  6,    5,     4.5,  4,    7];
+// defaults for streets the facade survey (tools/widths.mjs) could not measure; Dakar medians are ~9 m
+const WIDTH = [11,  11,   10,   9.5, 9,    8,    7.5,  5.5,   5,    4,    7];
+const SIDEW = [0,   2.5,  3,    3,   2.5,  2,    2,    1,     1,    0,    0];
 const SPEED = [30,  23,   16,   14,  12,   8,    8,    5,     6,    7,    14];
 const DRIVABLE = t => t !== 9 || true;
 const roads = [];
-for (const [t, ni, ow, lanes, flat] of D.roads) {
+for (const [t, ni, ow, lanes, flat, mw, ms] of D.roads) {
   const pts = []; let x = 0, z = 0;
   for (let i = 0; i < flat.length; i += 2) {
     x += flat[i]; z += flat[i + 1];
@@ -42,9 +44,9 @@ for (const [t, ni, ow, lanes, flat] of D.roads) {
     pts.push([x, z]);
   }
   if (pts.length < 2) continue;
-  const w = lanes ? clamp(lanes * 3.3 + 1, 5, 18) : WIDTH[t];
+  const w = mw ? mw / 10 : lanes ? clamp(lanes * 3.3 + 1, 5, 18) : WIDTH[t], side = ms ? Math.min(3.5, ms / 10) : SIDEW[t];
   const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-  roads.push({ t, name: ni >= 0 ? D.names[ni] : '', ow, w, pts, cum, len: cum[cum.length - 1] });
+  roads.push({ t, name: ni >= 0 ? D.names[ni] : '', ow, w, side, pts, cum, len: cum[cum.length - 1] });
 }
 
 // spatial grid of segments
@@ -77,7 +79,7 @@ function roadOverlap(x, z, margin = 0.4) {
       const r = roads[s[j]], i = s[j + 1]; if (r.t > 8) continue;
       const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
       const t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1), qx = ax + dx * t, qz = az + dz * t, d = Math.hypot(x - qx, z - qz);
-      const band = r.w / 2 + (r.t >= 2 && r.t <= 7 ? 1.8 : 0.3) + margin, o = band - d;
+      const band = r.w / 2 + Math.max(0.3, r.side) + margin, o = band - d;
       if (o > worst) { worst = o; const k = d > 1e-3 ? 1 / d : 0; px = (x - qx) * k; pz = (z - qz) * k; if (!k) { const l = Math.sqrt(L2); px = -dz / l; pz = dx / l; } }
     }
   }
@@ -499,7 +501,7 @@ function buildChunk(gx, gz) {
     const color = dirt ? sandy : r.t <= 1 ? aspC : r.t <= 4 ? aspA : aspB;
     for (const i of list) {
       ribbon(R.pos, R.col, R.uv, r.pts, i, i + 1, r.w / 2, y, color);
-      if (r.t >= 2 && r.t <= 7 && !dirt) ribbon(S.pos, S.col, S.uv, r.pts, i, i + 1, r.w / 2 + 1.8, 0.1, side);
+      if (r.side > 0.5 && !dirt) ribbon(S.pos, S.col, S.uv, r.pts, i, i + 1, r.w / 2 + r.side, 0.1, side);
       // markings
       if (r.t <= 4 && !dirt) {
         const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / L, uz = (bz - az) / L;
@@ -513,7 +515,7 @@ function buildChunk(gx, gz) {
       }
       // props along segment
       if (r.t <= 3 && Math.random() < 0.55) {
-        const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], f = Math.random(), x = ax + (bx - ax) * f, z = az + (bz - az) * f, h = Math.atan2(bx - ax, bz - az), s = Math.random() < 0.5 ? 1 : -1, off = r.w / 2 + 1.3;
+        const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], f = Math.random(), x = ax + (bx - ax) * f, z = az + (bz - az) * f, h = Math.atan2(bx - ax, bz - az), s = Math.random() < 0.5 ? 1 : -1, off = r.w / 2 + Math.max(0.6, r.side - 0.5);
         const px = x - Math.cos(h) * off * s, pz = z + Math.sin(h) * off * s;
         if (!isWater(px, pz)) lamps.push([px, pz, h + (s > 0 ? Math.PI / 2 : -Math.PI / 2)]);
         if (!outsideDakar(x) && Math.random() < 0.5) { const qx = x + Math.cos(h) * (off + 1.5) * s, qz = z - Math.sin(h) * (off + 1.5) * s; const q = clearOfRoads(qx, qz, -1.2); if (q && !isWater(q[0], q[1])) palms.push(q); }
@@ -560,7 +562,7 @@ function buildChunk(gx, gz) {
         for (let d = rand(2, 6); d < L - 4; d += rand(9, 14)) for (const s of [1, -1]) {
           if (Math.random() < 0.18) continue;
           const real = Math.random() < 0.22 ? (Math.random() < 0.8 ? 'maison' : 'maisonbasket') : null;
-          const wAlong = real ? PROP_CFG[real].len : rand(7, 12), depth = real ? PROP_CFG[real].len * 0.8 : rand(8, 13), off = r.w / 2 + 2.6 + depth / 2;
+          const wAlong = real ? PROP_CFG[real].len : rand(7, 12), depth = real ? PROP_CFG[real].len * 0.8 : rand(8, 13), off = r.w / 2 + r.side + 0.8 + depth / 2;
           const cx = ax + ux * d - uz * off * s, cz = az + uz * d + ux * off * s;
           const ok = (() => { const okey = Math.round(cx / 6) + ',' + Math.round(cz / 6); if (occ.has(okey)) return false;
             if (isWater(cx, cz) || roadOverlap(cx, cz)) return false;
@@ -575,7 +577,7 @@ function buildChunk(gx, gz) {
           const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
           cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
           // street life: kiosks, coffee carts, fruit carts on the sidewalk
-          if (Math.random() < 0.1) { const pn = pick(['kiosque_om', 'kiosque_om', 'cafe', 'fruitcart']); if (PROPS[pn]) placeProp(group, pn, ax + ux * d - uz * (r.w / 2 + 1.4) * s, az + uz * d + ux * (r.w / 2 + 1.4) * s, faceRoad); }
+          if (Math.random() < 0.1) { const pn = pick(['kiosque_om', 'kiosque_om', 'cafe', 'fruitcart']); if (PROPS[pn]) placeProp(group, pn, ax + ux * d - uz * (r.w / 2 + r.side * 0.6) * s, az + uz * d + ux * (r.w / 2 + r.side * 0.6) * s, faceRoad); }
         }
       }
     }
@@ -601,7 +603,7 @@ function buildChunk(gx, gz) {
     const poles = [], wire = [];
     for (const [ri, list] of byRoad) {
       const r = roads[ri]; if (r.t < 3 || r.t > 7 || r.w > 14) continue;
-      const side = (ri & 1) ? 1 : -1, off = r.w / 2 + 1.1; let prev = null;
+      const side = (ri & 1) ? 1 : -1, off = r.w / 2 + Math.max(0.6, r.side - 0.4); let prev = null;
       for (const i of list) {
         const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az); if (L < 1) continue; const ux = (bx - ax) / L, uz = (bz - az) / L;
         for (let d = (32 - (r.cum[i] % 32)) % 32; d < L; d += 32) {
@@ -665,7 +667,7 @@ function buildChunk(gx, gz) {
         for (let d = rand(3, 9); d < L - 3; d += rand(7, 16)) {
           const sd = Math.random() < 0.5 ? 1 : -1, x = ax + (bx - ax) * d / L, z = az + (bz - az) * d / L;
           if (r.t >= 4 && city && Math.random() < 0.35) { const o = r.w / 2 - 1.1; parked.push([x - cs * o * sd, z + sn * o * sd, h + (Math.random() < 0.5 ? 0 : Math.PI)]); }
-          else if (r.t <= 4 && city && Math.random() < 0.12) { const o = r.w / 2 + 2.2; stalls.push([x - cs * o * sd, z + sn * o * sd, h]); }
+          else if (r.t <= 4 && city && Math.random() < 0.12) { const o = r.w / 2 + Math.max(1.5, r.side * 0.75); stalls.push([x - cs * o * sd, z + sn * o * sd, h]); }
           else if (Math.random() < 0.05) { const o = r.w / 2 + 0.8; piles.push([x - cs * o * sd, z + sn * o * sd]); }
         }
       }
@@ -1042,7 +1044,7 @@ function updatePeds(dt) {
     if (d > 190) { p.g.visible = false; continue; }
     if (!p.alive) { p.vy -= 22 * dt; p.y = Math.max(0, p.y + p.vy * dt); p.x += p.vx * dt; p.z += p.vz * dt; p.vx *= 0.98; p.vz *= 0.98; p.g.rotation.x = Math.min(Math.PI / 2, p.g.rotation.x + dt * 5); p.g.position.set(p.x, p.y, p.z); p.dead += dt; if (p.dead > 25) p.g.visible = false; continue; }
     const r = p.r; const [x, z, h] = roadPoint(r, clamp(p.s, 0, r.len)); const hd = p.dir > 0 ? h : h + Math.PI;
-    const off = (r.w / 2 + 1.2) * p.side * (p.state === 'cross' ? 1 - 2 * p.cross : 1);
+    const off = (r.w / 2 + Math.max(1, r.side * 0.6)) * p.side * (p.state === 'cross' ? 1 - 2 * p.cross : 1);
     // flee from fast player car
     const pv = Math.hypot(player.vx, player.vz);
     if (d < 14 && pv > 8 && p.state !== 'flee') { p.state = 'flee'; p.ar.reset().play(); p.aw.stop(); p.fleeT = 2; }
