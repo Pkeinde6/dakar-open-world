@@ -650,8 +650,21 @@ function roofExtras(B, R, pts, h, tall, chantier = 0.35) {
 const TSTEP = 5, TN = CELL / TSTEP + 1;
 function vnoise(x, z) { const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz, h = (a, b) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); }, ux = fx * fx * (3 - 2 * fx), uz = fz * fz * (3 - 2 * fz);
   return (h(ix, iz) * (1 - ux) + h(ix + 1, iz) * ux) * (1 - uz) + (h(ix, iz + 1) * (1 - ux) + h(ix + 1, iz + 1) * ux) * uz; }
-function rawHeight(x, z) { // dune field: broad swells + ridges, taller outside the city
-  const amp = outsideDakar(x) ? 14 : 6;
+// Towns are flat: Dakar sits on a sandy plateau (the only real hills, the Mamelles, are a landmark) and Touba,
+// Diourbel or Rufisque are built on level ground. Dunes only rise where buildings thin out. Density is read per
+// chunk from the OSM footprints, averaged 3x3 and interpolated so the relief has no seam between chunks.
+const densCache = new Map();
+function cellDens(cx, cz) { const k = ckey(cx, cz); let v = densCache.get(k); if (v === undefined) { v = 0; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) v += (bGrid.get(ckey(cx + a, cz + b)) || []).length; v /= 9; densCache.set(k, v); } return v; }
+function urbanAt(x, z) {
+  const fx = x / CELL - 0.5, fz = z / CELL - 0.5, ix = Math.floor(fx), iz = Math.floor(fz), u = fx - ix, v = fz - iz;
+  const d = (cellDens(ix, iz) * (1 - u) + cellDens(ix + 1, iz) * u) * (1 - v) + (cellDens(ix, iz + 1) * (1 - u) + cellDens(ix + 1, iz + 1) * u) * v;
+  let k = clamp((d - 3) / 12, 0, 1);
+  for (const p of cityPlaces) { const r = p.type === 'city' ? 2600 : 1300, dd = Math.hypot(p.x - x, p.z - z); if (dd < r * 1.6) k = Math.max(k, clamp((r * 1.6 - dd) / (r * 0.6), 0, 1)); }
+  return k;
+}
+function rawHeight(x, z) { // dune field: broad swells + ridges, taller outside the city, none in town
+  const urb = urbanAt(x, z); if (urb >= 1) return 0;
+  const amp = (outsideDakar(x) ? 14 : 6) * (1 - urb);
   const n = vnoise(x / 260, z / 260) * 0.6 + vnoise(x / 90 + 7, z / 90 - 3) * 0.3 + vnoise(x / 30, z / 30) * 0.1;
   return Math.max(0, n - 0.35) * amp / 0.65;
 }
