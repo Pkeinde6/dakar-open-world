@@ -104,8 +104,9 @@
 <div class="hud" id="speedo"><div id="carname"></div><b id="kmh">0</b><span>KM/H</span></div>
 <div class="hud" id="big"></div>
 <div class="hud" id="toast"></div>
+<div class="hud" id="gcredit" style="display:none;position:fixed;right:10px;bottom:4px;font:11px Inter,Arial;color:#fff;text-shadow:0 0 3px #000;opacity:.85"></div>
 <div id="hackui"></div>
-<div class="hud" id="help">ZQSD / Flèches conduire · Espace frein à main · Maj nitro · E pirater un feu · F pirater un véhicule · G blackout · T service on/off · J voyage rapide · Y radio · M carte · C caméra · N jour/nuit · V changer de voiture · H klaxon · 1 Dakar · 2 Diourbel · 3 Touba · R réapparaître · P qualité</div>
+<div class="hud" id="help">ZQSD / Flèches conduire · Espace frein à main · Maj nitro · E pirater un feu · F pirater un véhicule · G blackout · T service on/off · J voyage rapide · Y radio · K Google 3D · M carte · C caméra · N jour/nuit · V changer de voiture · H klaxon · 1 Dakar · 2 Diourbel · 3 Touba · R réapparaître · P qualité</div>
 
 <div id="fullmap"><canvas id="fullcanvas"></canvas>
   <div class="legend">CARTE — Dakar · Diourbel · Touba<br>Molette : zoom · Glisser : déplacer<br>Clic : placer un repère GPS · Double-clic : s'y téléporter<br>Points bleus « i » : lieux à découvrir (verts = déjà vus)<br>M ou Échap : fermer</div>
@@ -119,12 +120,15 @@
 </div>
 
 <script src="data.js?v=14"></script>
+<script src="cle-google.js" onerror="this.remove()"></script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "3d-tiles-renderer": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.39/src/index.js"
 } }
 </script>
-<script type="module" src="game.js?v=31"></script>
+<script type="module" src="game.js?v=33"></script>
 </body>
 </html>

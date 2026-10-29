@@ -425,6 +425,7 @@ const tankMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
 const dishMat = new THREE.MeshStandardMaterial({ color: 0xdcdcd6, roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide });
 const rebarMat = new THREE.LineBasicMaterial({ color: 0x6b3d22 });
 const clothMat = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide });
+const bougMat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }); // bougainvillier qui deborde des murs
 // wind: vertex sway above a base height, phase from the instance position so neighbours don't move in lockstep
 const windT = { value: 0 };
 function windy(mat, base, amp) {
@@ -452,18 +453,19 @@ windy(leafMat, 7.5, 0.06); windy(palmTrunkMat, 3, 0.012); windy(neemMat, -3, 0.0
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshStandardMaterial({ map: sandTex, roughness: 1 }));
 ground.geometry.attributes.uv.array.forEach((v, i, a) => a[i] = v * 600);
 pbr(ground.material, 'sand_02', { normal: 0.8 });
+const groundOff = { value: new THREE.Vector2() }; // the 8 km ground plane follows the player (Touba is 170 km away)
 { const gm = ground.material, gravel = { value: null };
   texLoader.load('textures/gravelly_sand_diff.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); gravel.value = t; gm.defines = { GRAVEL: 1 }; gm.needsUpdate = true; });
   gm.onBeforeCompile = (sh) => {
-    sh.uniforms.tGravel = gravel;
-    sh.fragmentShader = `uniform sampler2D tGravel;
+    sh.uniforms.tGravel = gravel; sh.uniforms.uGOff = groundOff;
+    sh.fragmentShader = `uniform sampler2D tGravel; uniform vec2 uGOff;
 float gn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);float a=fract(sin(dot(i,vec2(127.1,311.7)))*43758.5),b=fract(sin(dot(i+vec2(1,0),vec2(127.1,311.7)))*43758.5),c=fract(sin(dot(i+vec2(0,1),vec2(127.1,311.7)))*43758.5),d=fract(sin(dot(i+vec2(1,1),vec2(127.1,311.7)))*43758.5);return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);}
 `
       + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
       #ifdef GRAVEL
-        vec2 wp = vMapUv * 0.06;
+        vec2 wp = (vMapUv + uGOff) * 0.06;
         float m = smoothstep(.45, .7, gn(wp) * .7 + gn(wp * 3.7) * .3);
-        vec3 gv = texture2D(tGravel, vMapUv * 0.8).rgb;
+        vec3 gv = texture2D(tGravel, (vMapUv + uGOff) * 0.8).rgb;
         diffuseColor.rgb = mix(diffuseColor.rgb, gv * vec3(1.05, .92, .8), m);
         diffuseColor.rgb *= mix(.9, 1.06, gn(wp * 9.));
       #endif`);
@@ -483,9 +485,68 @@ if (waterPoly) {
 // ---------------- Chunks ----------------
 const chunks = new Map();
 const colliders = new Map(); // ckey -> [{pts,minx,maxx,minz,maxz}]
-const FACADE = [0xe8d4b0, 0xdba56c, 0xf3efe6, 0xeedc9a, 0xe0a386, 0xc9d3d6, 0xc3764f, 0xd8c2a0, 0xf0e2c8, 0xb9cfb0];
-const isPlateau = (x, z) => x > -400 && x < 2600 && z > -1800 && z < 1600;
 const outsideDakar = x => x > 40000;
+
+// ---------------- Styles de quartier ----------------
+// Each part of town has its own look (from street-level photos): the colonial Plateau in ochre and white with
+// shops at every ground floor, the Medina's bright paints and half-built storeys, the Sicap/HLM estates of
+// identical pastel R+1 houses, villas hidden behind white walls and bougainvillea in Fann/Mermoz/Almadies,
+// raw cement-block banlieue in Pikine/Guediawaye, and the low sand-coloured walled compounds of Touba and Diourbel.
+// h = storeys [min, max), shops/roof/chantier/wall = probabilities, bare = unpainted parpaing.
+const BARE = 0xaaa59b;
+const STYLES = {
+  plateau: { pal: [0xe9d7a8, 0xdcb47c, 0xf2ece0, 0xe3c48f, 0xc98f6a, 0xf0e6d2, 0xd7cfc0, 0xbfcfd6], h: [2, 9], shops: 0.85, roof: 0.15, chantier: 0, bare: 0, wall: 0 },
+  medina: { pal: [0xe6c15a, 0x7fb3cf, 0xe08a5b, 0xa9c98f, 0xf0e2c8, 0xdca3a0, 0xc9d3d6, 0xe8d4b0], h: [1, 4.6], shops: 0.65, roof: 0.9, chantier: 0.4, bare: 0.1, wall: 0 },
+  sicap: { pal: [0xf0dcb4, 0xe8cfa0, 0xdfe5d3, 0xf3e9d6, 0xe9c9b0, 0xd6e0e4], h: [1, 3], shops: 0.3, roof: 0.7, chantier: 0.2, bare: 0.05, wall: 0.55, wallPal: [0xf3efe6, 0xe8dcc0, 0xe5c99a] },
+  villa: { pal: [0xf6f2ea, 0xefe6d6, 0xe8dcc4, 0xf3ebe3, 0xdfd2bd, 0xe9e2d6], h: [1, 3.4], shops: 0.08, roof: 0.35, chantier: 0.08, bare: 0, wall: 0.95, wallPal: [0xf7f4ee, 0xf1ebe0, 0xe6dccb], boug: 0.7 },
+  banlieue: { pal: [BARE, BARE, 0xe5d3b0, 0xd9a877, 0xc7d0c9, 0xe8d4b0, 0xc6b9a4], h: [1, 3.3], shops: 0.5, roof: 0.95, chantier: 0.6, bare: 0.4, wall: 0.35, wallPal: [BARE, 0xd8c7a6] },
+  touba: { pal: [0xdcae7f, 0xe7c79a, 0xcd9468, 0xefe0c4, 0xe3b9a0, 0xd6c3a2], h: [1, 2.25], shops: 0.3, roof: 0.6, chantier: 0.5, bare: 0.3, wall: 0.8, wallPal: [0xdcae7f, 0xe7c79a, BARE, 0xefe0c4] },
+  diourbel: { pal: [0xe2c48e, 0xd9a877, 0xefe2c9, 0xc98f6a, 0xd8c2a0, 0xb9cfb0], h: [1, 2.4], shops: 0.35, roof: 0.6, chantier: 0.4, bare: 0.25, wall: 0.65, wallPal: [0xe2c48e, 0xefe2c9, BARE] },
+  rufisque: { pal: [0xe3b878, 0xd08a62, 0xf0e2c8, 0xbfd0c8, 0xe9c98f, 0xc3764f], h: [1, 3], shops: 0.6, roof: 0.6, chantier: 0.25, bare: 0.1, wall: 0.2, wallPal: [0xf0e2c8] },
+  village: { pal: [0xd8c2a0, 0xe0c9a0, 0xc9a57a, 0xe6d5b8], h: [1, 1.6], shops: 0.1, roof: 0.4, chantier: 0.3, bare: 0.4, wall: 0.7, wallPal: [0xd8c2a0, BARE] },
+};
+// anchors: [place name or [lat, lon], style, radius m]; the nearest anchor (relative to its radius) wins
+const ZONES = [
+  ['Dakar-Plateau', 'plateau', 1500], ['Rebeuss', 'medina', 700], ['Medina', 'medina', 1100], ['Gueule Tapée', 'medina', 700], ['Fass Delorme', 'medina', 600],
+  ['Colobane', 'medina', 700], ['HLM Fass', 'sicap', 500], ['Point E', 'villa', 650], ['Fann Résidence', 'villa', 700], ['Fann', 'villa', 500], ['Fann Mermoz', 'villa', 500],
+  ['Mermoz', 'villa', 900], ['Sacré Coeur', 'villa', 800], ['Almadies', 'villa', 1600], ['Ngor', 'villa', 900], ['Mamelles', 'villa', 900], ['Ouakam', 'banlieue', 900],
+  ['Amitié', 'sicap', 700], ['Liberté', 'sicap', 1100], ['HLM', 'sicap', 800], ['Biscuiterie', 'sicap', 600], ['Castor', 'sicap', 600], ['Derklé', 'sicap', 600],
+  ['Hann Bel-Air', 'banlieue', 1200], ['Grand Yoff', 'banlieue', 1100], ['Arafat', 'banlieue', 600], ['Cité Millionnaire', 'banlieue', 500], ['Yoff', 'medina', 1300],
+  ['Patte d\'Oie', 'sicap', 700], ['Parcelles Assainies', 'banlieue', 2200], ['Pikine', 'banlieue', 3500], ['Guédiawaye', 'banlieue', 3000], ['Thiaroye', 'banlieue', 2500],
+  ['Yeumbeul', 'banlieue', 2500], ['Keur Massar', 'banlieue', 3000], ['Malika', 'banlieue', 2000], ['Rufisque', 'rufisque', 2500], ['Bargny', 'village', 2000],
+  ['Touba', 'touba', 7000], ['Mbacké', 'touba', 3500], ['Diourbel', 'diourbel', 4000], ['Bambey', 'diourbel', 2500], ['Thiès', 'diourbel', 4500],
+].map(([n, s, r]) => { const p = typeof n === 'string' ? places.find(q => q.name === n) : (([x, z]) => ({ x, z }))(ll(...n)); return p && { x: p.x, z: p.z, s: STYLES[s], r }; }).filter(Boolean);
+function styleAt(x, z) {
+  let best = null, bd = 1;
+  for (const a of ZONES) { const d = Math.hypot(a.x - x, a.z - z) / a.r; if (d < bd) { bd = d; best = a.s; } }
+  return best || (outsideDakar(x) ? STYLES.village : STYLES.banlieue);
+}
+const storeys = st => Math.max(1, (rand(st.h[0], st.h[1])) | 0);
+const facadeOf = st => Math.random() < st.bare ? BARE : pick(st.pal);
+// murs de cloture around a compound: each footprint edge pushed out by `m`, gap for the gate on the road side
+function addCompoundWall(B, cols, BG, pts, st, others) {
+  if (pts.length > 8) return;
+  const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]), cx = xs.reduce((a, b) => a + b) / xs.length, cz = zs.reduce((a, b) => a + b) / zs.length;
+  const m = rand(1.6, 3.2), col = pick(st.wallPal || [0xf3efe6]), H = rand(1.9, 2.5);
+  const out = pts.map(([x, z]) => { const dx = x - cx, dz = z - cz, L = Math.hypot(dx, dz) || 1; return [x + dx / L * m * 1.3, z + dz / L * m * 1.3]; });
+  const blocked = (x, z) => roadOverlap(x, z, 0.3) || isWater(x, z) || others.some(c => c.pts !== pts && x > c.minx - 0.3 && x < c.maxx + 0.3 && z > c.minz - 0.3 && z < c.maxz + 0.3);
+  let gate = -1, gd = 1e9; // gate on the edge closest to a road
+  out.forEach(([x, z], i) => { const [x2, z2] = out[(i + 1) % out.length], n = nearestRoad((x + x2) / 2, (z + z2) / 2, 0); if (n && n.d < gd) { gd = n.d; gate = i; } });
+  for (let i = 0; i < out.length; i++) {
+    const [ax, az] = out[i], [bx, bz] = out[(i + 1) % out.length], dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz); if (L < 1.5) continue;
+    const ux = dx / L, uz = dz / L, rot = Math.atan2(-dz, dx);
+    const parts = i === gate && L > 5 ? [[0, L / 2 - 1.6], [L / 2 + 1.6, L]] : [[0, L]];
+    for (const [s0, s1] of parts) {
+      const x0 = ax + ux * s0, z0 = az + uz * s0, x1 = ax + ux * s1, z1 = az + uz * s1, mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+      if (blocked(x0, z0) || blocked(x1, z1) || blocked(mx, mz)) continue;
+      addBox(B, mx, 0, mz, s1 - s0, H, 0.22, rot, col);
+      addBox(B, mx, H, mz, s1 - s0 + 0.1, 0.12, 0.34, rot, 0xe9e4da); // chaperon
+      const nx = -uz * 0.15, nz = ux * 0.15, wp = [[x0 + nx, z0 + nz], [x1 + nx, z1 + nz], [x1 - nx, z1 - nz], [x0 - nx, z0 - nz]];
+      cols.push({ pts: wp, minx: Math.min(x0, x1) - 0.2, maxx: Math.max(x0, x1) + 0.2, minz: Math.min(z0, z1) - 0.2, maxz: Math.max(z0, z1) + 0.2 });
+      if (st.boug && Math.random() < st.boug) for (let d = rand(0.5, 2); d < s1 - s0; d += rand(2.5, 6)) BG.push([x0 + ux * d, H, z0 + uz * d]);
+    }
+  }
+}
 
 // sand blown onto the carriageway edge: strip from `o1` (inner, fades out) to `o0` (curb side), both sides
 function sandEdge(E, pts, cum, i, o0, o1, y) {
@@ -549,7 +610,7 @@ function addBox(B, cx, y0, cz, w, h, d, rot, colHex) {
 }
 // Dakar roofs are terraces people live on: a stair hut, black water tanks, dishes, and on houses still being
 // built floor by floor, concrete pillar stubs with rebar left sticking out for the next storey ("fers d'attente").
-function roofExtras(B, R, pts, h, tall) {
+function roofExtras(B, R, pts, h, tall, chantier = 0.35) {
   const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]), cx = xs.reduce((a, b) => a + b) / xs.length, cz = zs.reduce((a, b) => a + b) / zs.length;
   const span = Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs));
   if (span < 5 || !inPoly(cx, cz, pts)) return;
@@ -561,7 +622,7 @@ function roofExtras(B, R, pts, h, tall) {
   }
   for (let n = Math.random() < 0.6 ? (Math.random() < 0.3 ? 2 : 1) : 0; n > 0; n--) { const x = cx + rand(-span, span) * 0.25, z = cz + rand(-span, span) * 0.25; if (inside(x, z)) R.tanks.push([x, h, z, Math.random() < 0.8]); }
   if (Math.random() < 0.3) { const p = pick(pts), x = p[0] + (cx - p[0]) * 0.15, z = p[1] + (cz - p[1]) * 0.15; if (inside(x, z)) R.dishes.push([x, h, z, rand(0, 6)]); }
-  if (!tall && Math.random() < 0.35) for (const [px, pz] of pts) { // poteaux d'attente
+  if (!tall && Math.random() < chantier) for (const [px, pz] of pts) { // poteaux d'attente
     const L = Math.hypot(cx - px, cz - pz) || 1, x = px + (cx - px) / L * 0.3, z = pz + (cz - pz) / L * 0.3, ph = Math.random() < 0.5 ? rand(0.3, 0.9) : rand(1.2, 2.6);
     addBox(B, x, h, z, 0.26, ph, 0.26, rot, 0xbdb6a8);
     for (const [ox, oz] of [[-0.08, -0.08], [0.08, -0.08], [0.08, 0.08], [-0.08, 0.08]]) R.rebar.push(x + ox, h + ph, z + oz, x + ox + rand(-.12, .12), h + ph + rand(0.5, 1.1), z + oz + rand(-.12, .12));
@@ -657,7 +718,7 @@ function buildChunk(gx, gz) {
 
   // buildings: OSM
   const B = { pos: [], nor: [], uv: [], col: [], shop: { pos: [], nor: [], uv: [], col: [] } }, RF = { tanks: [], dishes: [], rebar: [], lines: [] };
-  const ids = bGrid.get(k) || [];
+  const ids = bGrid.get(k) || [], walls = [], BG = [];
   for (const bi of ids) {
     const [lv, kind, flat] = D.buildings[bi]; const pts = []; let x = 0, z = 0;
     for (let i = 0; i < flat.length; i += 2) { x += flat[i]; z += flat[i + 1]; pts.push([x, z]); }
@@ -667,12 +728,14 @@ function buildChunk(gx, gz) {
       if (moved < 0) continue;
       let ar = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; ar += x1 * z2 - x2 * z1; } if (Math.abs(ar) < 12) continue;
     }
+    const st = styleAt(x, z);
     let h;
-    if (kind === 1) h = 11; else if (lv) h = lv * 3.1; else h = isPlateau(x, z) ? 3.1 * ((rand(2, 9)) | 0) : outsideDakar(x) ? 3.1 * (Math.random() < 0.7 ? 1 : 2) : 3.1 * ((rand(1, 4)) | 0);
-    addBuilding(B, pts, h, kind === 1 ? 0xf4f1ea : pick(FACADE), 0xb9b0a0, kind !== 1 && Math.random() < (isPlateau(x, z) ? 0.8 : 0.45));
-    if (kind !== 1 && !isPlateau(x, z)) roofExtras(B, RF, pts, h, h > 13);
+    if (kind === 1) h = 11; else if (lv) h = lv * 3.1; else h = 3.1 * storeys(st);
+    addBuilding(B, pts, h, kind === 1 ? 0xf4f1ea : facadeOf(st), 0xb9b0a0, kind !== 1 && Math.random() < st.shops);
+    if (kind !== 1 && Math.random() < st.roof) roofExtras(B, RF, pts, h, h > 13, st.chantier);
     const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
     cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
+    if (kind !== 1 && h < 8 && st.wall && Math.random() < st.wall) walls.push([pts, st]);
     if (kind === 1) { // minaret on mosques, height from footprint size
       let area = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; area += x1 * z2 - x2 * z1; } area = Math.abs(area / 2);
       if (area > 300) addMinaret(group, (Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2, clamp(Math.sqrt(area) * 0.9, 18, 87), area);
@@ -698,18 +761,20 @@ function buildChunk(gx, gz) {
             for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) occ.add((Math.round(cx / 6) + a) + ',' + (Math.round(cz / 6) + b)); return true; })();
           if (!ok) continue;
           const hw = wAlong / 2, hd = depth / 2, pts = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([a, b]) => [cx + ux * a - uz * b, cz + uz * a + ux * b]);
-          const fl = outsideDakar(cx) ? (Math.random() < 0.75 ? 1 : 2) : ((rand(1, 4.5)) | 0);
+          const st = styleAt(cx, cz), fl = storeys(st);
           const faceRoad = Math.atan2(uz * s, -ux * s); // model front (+z) toward the road
           if (real && PROPS[real]) placeProp(group, real, cx, cz, faceRoad);
-          else { addBuilding(B, pts, fl * 3.1, pick(FACADE), 0xb5ab9a, Math.random() < 0.5); roofExtras(B, RF, pts, fl * 3.1, false); }
+          else { addBuilding(B, pts, fl * 3.1, facadeOf(st), 0xb5ab9a, Math.random() < st.shops); if (Math.random() < st.roof) roofExtras(B, RF, pts, fl * 3.1, false, st.chantier); }
           const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
           cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
+          if (st.wall && Math.random() < st.wall * 0.6) walls.push([pts, st]);
           // street life: kiosks, coffee carts, fruit carts on the sidewalk
           if (Math.random() < 0.1) { const pn = pick(['kiosque_om', 'kiosque_om', 'cafe', 'fruitcart']); if (PROPS[pn]) placeProp(group, pn, ax + ux * d - uz * (r.w / 2 + r.side * 0.6) * s, az + uz * d + ux * (r.w / 2 + r.side * 0.6) * s, faceRoad); }
         }
       }
     }
   }
+  { const foot = cols.slice(); for (const [pts, st] of walls) addCompoundWall(B, cols, BG, pts, st, foot); }
   if (B.pos.length) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(B.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(B.nor, 3));
@@ -727,6 +792,8 @@ function buildChunk(gx, gz) {
   { // toits : citernes, paraboles, fers d'attente, linge
     const tk = inst(G.tank, tankMat, RF.tanks, (o, [x, y, z]) => { o.position.set(x, y, z); o.rotation.set(0, rand(0, 6), 0); const k = rand(0.85, 1.15); o.scale.set(k, k, k); }, Q.bshadow);
     if (tk) { const c = new THREE.Color(); RF.tanks.forEach((t, i) => tk.setColorAt(i, c.set(t[3] ? 0x1c1c1e : pick([0xe8e8e2, 0x3d6fb0, 0xd9c48a])))); }
+    const bg = inst(G.bush, bougMat, BG, (o, [x, y, z]) => { o.position.set(x, y + 0.15, z); o.rotation.set(0, rand(0, 6), 0); const k = rand(0.45, 0.8); o.scale.set(k * 1.3, k * 0.7, k); }, false);
+    if (bg) { const c = new THREE.Color(); BG.forEach((_, i) => bg.setColorAt(i, c.set(pick([0xc2207a, 0xd6338a, 0xb01c6c, 0x3f6b2a, 0xe0559c])))); }
     inst(G.dish, dishMat, RF.dishes, (o, [x, y, z, r]) => { o.position.set(x, y, z); o.rotation.set(0, r, 0); o.scale.set(1, 1, 1); }, false);
     if (RF.rebar.length) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(RF.rebar, 3)); group.add(new THREE.LineSegments(g, rebarMat)); }
     const cloth = [], rope = [];
@@ -907,6 +974,7 @@ function updateChunks(px, pz) {
 function processQueue(n = 2) { for (let i = 0; i < n && buildQueue.length; i++) { const [gx, gz] = buildQueue.shift(); const k = ckey(gx, gz); if (!chunks.has(k)) chunks.set(k, buildChunk(gx, gz)); } }
 
 // landmarks
+const landmarkObjs = [];
 function landmarks() {
   // Monument de la Renaissance africaine (Mamelles)
   const [mx, mz] = ll(14.7221, -17.4950);
@@ -920,6 +988,7 @@ function landmarks() {
   const [lx, lz] = ll(14.7253, -17.5019); // phare des Mamelles
   const tower = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.6, 18, 10), new THREE.MeshStandardMaterial({ color: 0xffffff })); tower.position.set(lx, 58, lz); scene.add(tower);
   const hill2 = hill.clone(); hill2.position.set(lx, 25, lz); hill2.scale.setScalar(0.7); scene.add(hill2);
+  landmarkObjs.push(g, tower, hill2);
 }
 
 // ---------------- Models ----------------
@@ -1065,6 +1134,7 @@ addEventListener('keydown', e => {
     case 'KeyT': onDuty = !onDuty; if (!onDuty) { mission = null; waypoint = null; } toast(onDuty ? 'En service' : 'Hors service'); break;
     case 'KeyJ': skipTravel(); break;
     case 'KeyY': nextStation(); break;
+    case 'KeyK': toggleGoogle3D(); break;
     case 'KeyP': qIdx = (qIdx + 1) % QUALITY.length; try { localStorage.setItem('dow-quality', qIdx); } catch (e) { } toast(`Qualité : ${QUALITY[qIdx].name} — rechargement…`); setTimeout(() => location.reload(), 700); break;
     case 'Digit1': case 'Digit2': case 'Digit3': { const c = CITIES[e.code.slice(-1)]; clearWanted(); spawnAt(c.p[0], c.p[1]); toast(`Bienvenue à ${c.name}`); break; }
   }
@@ -1405,7 +1475,6 @@ function updateCamera(dt, vf) {
   camera.fov += ((62 + Math.min(18, sp * 0.25) + (boosting ? 12 : 0)) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
   camera.lookAt(player.x + fx * (camMode === 2 ? 30 : 6), camMode === 2 ? 1.1 : 1.4, player.z + fz * (camMode === 2 ? 30 : 6));
   sun.position.set(player.x + sunDir.x * 300, Math.max(30, sunDir.y * 300), player.z + sunDir.z * 300); sun.target.position.set(player.x, 0, player.z);
-  ground.position.set(Math.round(player.x / 10) * 10, 0, Math.round(player.z / 10) * 10);
 }
 
 // ---------------- Minimap & full map ----------------
@@ -1529,6 +1598,54 @@ function updateAudio(dt, vf) {
   siren.sg.gain.value = cops.length ? 0.025 : 0; siren.so.frequency.value = 700 + Math.sin(time * 4) * 250;
 }
 
+// ---------------- Google 3D (Photorealistic 3D Tiles) ----------------
+// K swaps the procedural city for Google's photogrammetry of the real streets. Needs a Google Maps Platform key
+// with the Map Tiles API enabled: ?gkey=... once in the URL (remembered on this browser) or window.GOOGLE_TILES_KEY
+// in cle-google.js (gitignored). Physics still runs on the OSM footprints, which line up with the real buildings.
+const GKEY = (() => { const u = new URLSearchParams(location.search).get('gkey'); try { if (u) localStorage.setItem('dow-gkey', u); return u || localStorage.getItem('dow-gkey') || window.GOOGLE_TILES_KEY || ''; } catch (e) { return u || window.GOOGLE_TILES_KEY || ''; } })();
+const g3d = { on: false, tiles: null, anchor: null, y: 0, yT: 0, rayT: 0, ray: new THREE.Raycaster(), credit: '' };
+const LATLON = (x, z) => [LAT0 - z / KZ, LON0 + x / KX];
+async function toggleGoogle3D() {
+  if (!GKEY) { toast('Google 3D : ajoute ta clé API (?gkey=... dans l\'adresse ou cle-google.js)'); return; }
+  if (!g3d.tiles) {
+    toast('Google 3D : chargement des tuiles…');
+    try {
+      const { TilesRenderer, GoogleCloudAuthPlugin } = await import('3d-tiles-renderer');
+      const t = new TilesRenderer(); t.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: GKEY, autoRefreshToken: true }));
+      t.setCamera(camera); t.setResolutionFromRenderer(camera, renderer); t.errorTarget = Q === QUALITY[0] ? 60 : 30;
+      t.group.matrixAutoUpdate = false; scene.add(t.group); g3d.tiles = t;
+      t.addEventListener('load-content', () => { g3d.loaded = true; });
+      setTimeout(() => { if (!g3d.loaded) toast('Google 3D : rien ne charge — vérifie la clé et que la Map Tiles API est activée'); }, 10000);
+    } catch (e) { console.error(e); toast('Google 3D : impossible de charger la bibliothèque'); return; }
+  }
+  g3d.on = !g3d.on; g3d.anchor = null;
+  g3d.tiles.group.visible = g3d.on; ground.visible = !g3d.on; if (waterMat) scene.children.forEach(o => { if (o.material === waterMat) o.visible = !g3d.on; });
+  for (const o of landmarkObjs) o.visible = !g3d.on;
+  $('gcredit').style.display = g3d.on ? 'block' : 'none'; scene.fog.density = g3d.on ? Q.fog * 0.35 : Q.fog;
+  toast(g3d.on ? 'Google 3D activé (K pour revenir à la ville du jeu)' : 'Ville du jeu');
+}
+function updateGoogle3D(dt) {
+  for (const ch of chunks.values()) ch.group.visible = !g3d.on;
+  if (!g3d.on || !g3d.tiles) return;
+  const t = g3d.tiles, gp = t.group;
+  // East-North-Up frame re-anchored near the player: the game map is flat, the globe is not (170 km to Touba = 2 km of drop)
+  if (!g3d.anchor || Math.hypot(player.x - g3d.anchor[0], player.z - g3d.anchor[1]) > 1500) {
+    g3d.anchor = [player.x, player.z]; const [la, lo] = LATLON(player.x, player.z), enu = new THREE.Matrix4();
+    t.ellipsoid.getEastNorthUpFrame(la * Math.PI / 180, lo * Math.PI / 180, enu);
+    g3d.base = new THREE.Matrix4().makeTranslation(player.x, 0, player.z).multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2)).multiply(enu.invert());
+    g3d.rayT = 0; g3d.yT = null;
+  }
+  // put the photogrammetry ground under the car: ray straight down through the tiles, eased so steps don't jolt
+  g3d.rayT -= dt;
+  if (g3d.rayT <= 0) { g3d.rayT = 0.4; g3d.ray.set(new THREE.Vector3(player.x, 800, player.z), new THREE.Vector3(0, -1, 0)); g3d.ray.far = 2000;
+    const hit = g3d.ray.intersectObject(gp, true)[0]; if (hit) { const yT = g3d.y - hit.point.y; if (g3d.yT == null) g3d.y = yT; g3d.yT = yT; } }
+  if (g3d.yT != null) g3d.y += (g3d.yT - g3d.y) * Math.min(1, dt * 2);
+  gp.matrix.makeTranslation(0, g3d.y, 0).multiply(g3d.base); gp.matrixWorldNeedsUpdate = true; gp.updateMatrixWorld(true);
+  camera.updateMatrixWorld(); t.setResolutionFromRenderer(camera, renderer); t.update();
+  const cr = (t.getAttributions?.() || []).filter(a => a.type === 'string').map(a => a.value).join(' · ');
+  if (cr !== g3d.credit) { g3d.credit = cr; $('gcredit').textContent = 'Google' + (cr ? ' · ' + cr : ''); }
+}
+
 // ---------------- Main loop ----------------
 const clock = new THREE.Clock(); let chunkT = 0, started = false;
 function loop() {
@@ -1539,9 +1656,12 @@ function loop() {
   chunkT -= dt; if (chunkT < 0) { chunkT = 0.5; updateChunks(player.x, player.z); }
   processQueue(1);
   updateSmoke(dt); updateNitroFx(); updateStory(dt); updateClock(dt); updateGares(); updateRadio(dt); updateDiscover(dt); updateRoute(dt); spawnTraffic(); updateTraffic(dt); updatePeds(dt); updateCops(dt);
-  updateTrafficLightVisuals(); updateCamera(dt, vf); updateHackUI(dt);
+  updateTrafficLightVisuals(); updateCamera(dt, vf); updateGoogle3D(dt); updateHackUI(dt);
   drawMinimap(dt, vf); updateHUD(dt, vf); updateAudio(dt, vf);
   if (waterMat) waterMat.normalMap.offset.set(time * 0.01, time * 0.006);
+  { const T = 8000 / 600 * 30, gx = Math.round(player.x / T) * T, gz = Math.round(player.z / T) * T; // whole texture tiles, so the sand never slides
+    if (gx !== ground.position.x || gz !== ground.position.z) { ground.position.set(gx, 0, gz); groundOff.value.set(gx * 600 / 8000, -gz * 600 / 8000); } }
+  sky.position.copy(camera.position);
   glowMat.opacity = night ? 0.8 : 0;
   grade.uniforms.t.value = time; windT.value = time;
   for (const pl of players) { const ph = pl.userData.ph; if (pl.userData.ball) { pl.position.x = Math.sin(time * .9 + ph) * 7; pl.position.z = Math.sin(time * .53 + ph) * 13; pl.position.y = 0.15 + Math.abs(Math.sin(time * 4 + ph)) * 0.6; } else { pl.position.x += Math.sin(time * .7 + ph) * 0.03; pl.position.z += Math.cos(time * .45 + ph * 2) * 0.05; pl.position.y = Math.abs(Math.sin(time * 9 + ph)) * 0.08; } }
