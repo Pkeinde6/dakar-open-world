@@ -72,9 +72,9 @@ roads.forEach((r, ri) => {
 
 // ---------------- Ponts & rampes ----------------
 // OSM bridges (tools/bridges.mjs -> bridges.js) lift their road: ~7 m per layer over a road or a railway, a little
-// over a canal. The height then runs down every connected road at 6 % (the approach embankments), so each road
+// over a canal. The height then runs down every connected road at 8 % (the approach embankments), so each road
 // gets r.y[] per vertex (0 elsewhere). Roads passing underneath share no node with the bridge: they stay down.
-const DECK = 6.8, SLOPE = 0.06;
+const DECK = 6.8, SLOPE = 0.08; // 8 %: usual for slip roads
 {
   const vkey = (x, z) => Math.round(x) * 1e6 + Math.round(z); // data.js coordinates are whole metres
   const atV = new Map(), byEnds = new Map();
@@ -93,7 +93,7 @@ const DECK = 6.8, SLOPE = 0.06;
     const r = roads[ri], h = DECK * Math.min(layer, 2); r.bridge = h;
     r.pts.forEach((_, i) => raise(ri, i, h));
   }
-  // a ramp climbs every road that meets the bridge or its ramp (slip roads, the street carrying on), at 6 %, so no
+  // a ramp climbs every road that meets the bridge or its ramp (slip roads, the street carrying on), at 8 %, so no
   // road ever ends against a step; roads that only cross underneath share no node and stay down
   while (heap.length) {
     const [h, ri, i] = pop(), r = roads[ri]; if (h < r.y[i] - 0.01) continue;
@@ -665,6 +665,15 @@ function prism(B, ax, az, bx, bz, o, hw, ta, tb, ba, bb, colHex) {
   quad(A0, B0, B3, A3); quad(B1, A1, A2, B2); quad(A3, B3, B2, A2); quad(A1, B1, B0, A0); quad(A1, A0, A3, A2); quad(B0, B1, B2, B3);
 }
 // is this vertex of road r inside another road's carriageway? (junctions: no sand strip across the crossing street)
+function crossesRoad(r, x, z) {
+  const gx = cellOf(x), gz = cellOf(z);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const s = segGrid.get(ckey(gx + a, gz + b)); if (!s) continue;
+    for (let j = 0; j < s.length; j += 2) { const o = roads[s[j]]; if (o === r || o.t > 8 && o.t !== 10) continue; const k = s[j + 1];
+      if (o.y && Math.max(o.y[k], o.y[k + 1]) > 3) continue; // passes overhead
+      const [ax, az] = o.pts[k], [bx, bz] = o.pts[k + 1], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1);
+      if (Math.hypot(x - ax - dx * t, z - az - dz * t) < o.w / 2 + 0.2) return true; } }
+  return false;
+}
 function onOtherRoad(r, i) {
   const [x, z] = r.pts[i], gx = cellOf(x), gz = cellOf(z);
   for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const s = segGrid.get(ckey(gx + a, gz + b)); if (!s) continue;
@@ -684,8 +693,20 @@ function groundRoadNear(x, z, m) {
 function bridgeSeg(BR, cols, r, i, y) {
   const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], ya = y + r.y[i], yb = y + r.y[i + 1], hw = r.w / 2 + 0.35;
   const bot = h => h > 3.4 ? h - 1.15 : 0; // high: slab 1.15 m thick; low: solid ramp down to the ground
-  prism(BR, ax, az, bx, bz, 0, hw, ya - 0.03, yb - 0.03, bot(ya), bot(yb), 0xc9c3b8);
-  for (const s of [1, -1]) prism(BR, ax, az, bx, bz, s * (hw - 0.17), 0.17, ya + 0.85, yb + 0.85, ya - 0.05, yb - 0.05, 0xe2ddd3);
+  if (ya > 3.4 || yb > 3.4) prism(BR, ax, az, bx, bz, 0, hw, ya - 0.03, yb - 0.03, bot(ya), bot(yb), 0xc9c3b8); // tablier
+  else { // remblai : earth bank sloping down at 1:1.5 on each side, as at real interchanges, not a concrete wall
+    prism(BR, ax, az, bx, bz, 0, hw, ya - 0.03, yb - 0.03, Math.max(0, ya - 0.4), Math.max(0, yb - 0.4), 0x55585c); // bitume du remblai
+    const L = Math.hypot(bx - ax, bz - az) || 1, nx = -(bz - az) / L, nz = (bx - ax) / L, c = new THREE.Color(0xb89b70);
+    for (const sd of [1, -1]) { const top = [[ax + nx * hw * sd, ya - 0.05, az + nz * hw * sd], [bx + nx * hw * sd, yb - 0.05, bz + nz * hw * sd]];
+      const foot = [[ax + nx * (hw + 1.5 * ya) * sd, 0.02, az + nz * (hw + 1.5 * ya) * sd], [bx + nx * (hw + 1.5 * yb) * sd, 0.02, bz + nz * (hw + 1.5 * yb) * sd]];
+      let q = [top[0], foot[0], foot[1], top[1]]; const e1 = q[1].map((v, k) => v - q[0][k]), e2 = q[3].map((v, k) => v - q[0][k]);
+      let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; if (n[1] < 0) { q = [q[0], q[3], q[2], q[1]]; n = n.map(v => -v); }
+      const l = Math.hypot(...n) || 1; n = n.map(v => v / l);
+      for (const v of [q[0], q[1], q[2], q[0], q[2], q[3]]) { BR.pos.push(...v); BR.nor.push(...n); BR.uv.push(0.01, 0.01); BR.col.push(c.r, c.g, c.b); } }
+  }
+  if (Math.max(r.y[i], r.y[i + 1]) > 0.6) { const L0 = Math.hypot(bx - ax, bz - az) || 1, px = -(bz - az) / L0, pz = (bx - ax) / L0; // garde-corps only where a fall is possible
+    for (const s of [1, -1]) { const o = s * (hw - 0.17); if ([0, 0.5, 1].some(f => crossesRoad(r, ax + (bx - ax) * f + px * o, az + (bz - az) * f + pz * o))) continue; // not across a merging carriageway
+      prism(BR, ax, az, bx, bz, o, 0.17, ya + 0.85, yb + 0.85, ya - 0.05, yb - 0.05, 0xe2ddd3); } }
   const L = r.cum[i + 1] - r.cum[i], ux = (bx - ax) / (L || 1), uz = (bz - az) / (L || 1);
   for (const e of r.stub || []) if (e === i || e === i + 1) { const [ex, ez] = r.pts[e], h = y + r.y[e]; // butée en bout d'impasse
     prism(BR, ex - ux * 0.2, ez - uz * 0.2, ex + ux * 0.2, ez + uz * 0.2, 0, hw, h + 0.9, h + 0.9, bot(h), bot(h), 0xe2ddd3);
@@ -706,6 +727,9 @@ function bridgeSeg(BR, cols, r, i, y) {
 function motorwayEdges(BR, cols, r, i, y) {
   const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = r.cum[i + 1] - r.cum[i]; if (L < 0.5) return;
   const ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux, ml = -(r.w / 2 + 0.45), gr = r.w / 2 + 0.7;
+  // never across another carriageway (at-grade crossings, slip roads merging): the barrier would cut that road
+  const across = o => [0, 0.5, 1].some(f => crossesRoad(r, ax + (bx - ax) * f + nx * o, az + (bz - az) * f + nz * o));
+  if (across(ml) || across(gr)) return;
   prism(BR, ax, az, bx, bz, ml, 0.32, y + 0.25, y + 0.25, 0, 0, 0xd6d2c8); prism(BR, ax, az, bx, bz, ml, 0.13, y + 0.85, y + 0.85, y + 0.25, y + 0.25, 0xe4e0d7);
   const c0 = r.cum[i], c1 = r.cum[i + 1];
   if (r.jcum.some(j => j > c0 - 70 && j < c1 + 70)) { return addMedianCol(cols, ax, az, bx, bz, nx, nz, ml); }

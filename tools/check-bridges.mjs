@@ -14,7 +14,7 @@ const where = (x, z) => `${(LAT0 - z / KZ).toFixed(5)},${(LON0 + x / KX).toFixed
 const H = (r, i) => r.y ? r.y[i] : 0, issues = { pente: [], marche: [], hauteurLibre: [], rampeEnLAir: [] };
 const vk = (x, z) => Math.round(x) + ',' + Math.round(z), atV = new Map();
 roads.forEach((r, ri) => r.pts.forEach(([x, z], i) => { if (Number.isInteger(x) && Number.isInteger(z)) { const k = vk(x, z); (atV.get(k) || atV.set(k, []).get(k)).push([ri, i]); } }));
-for (const r of roads) if (r.y) for (let i = 0; i + 1 < r.pts.length; i++) { const L = r.cum[i + 1] - r.cum[i]; if (L > 0.5 && Math.abs(r.y[i + 1] - r.y[i]) / L > 0.075) issues.pente.push([r.name, where(...r.pts[i]), (Math.abs(r.y[i + 1] - r.y[i]) / L * 100).toFixed(0) + '%']); }
+for (const r of roads) if (r.y) for (let i = 0; i + 1 < r.pts.length; i++) { const L = r.cum[i + 1] - r.cum[i]; if (L > 0.5 && Math.abs(r.y[i + 1] - r.y[i]) / L > 0.095) issues.pente.push([r.name, where(...r.pts[i]), (Math.abs(r.y[i + 1] - r.y[i]) / L * 100).toFixed(0) + '%']); }
 for (const [k, o] of atV) { if (o.length < 2) continue; const hs = o.map(([ri, i]) => H(roads[ri], i)), mx = Math.max(...hs), mn = Math.min(...hs);
   if (mx - mn > 0.4) issues.marche.push([o.map(([ri]) => roads[ri].name || '?').join(' / '), where(...k.split(',').map(Number)), mx.toFixed(1) + ' vs ' + mn.toFixed(1)]); }
 for (const r of roads) if (r.y) for (const e of [0, r.pts.length - 1]) { const [x, z] = r.pts[e]; if (r.y[e] > 0.4 && !(r.stub || []).includes(e) && (atV.get(vk(x, z)) || []).length < 2) issues.rampeEnLAir.push([r.name, where(x, z), r.y[e].toFixed(1) + ' m']); }
