@@ -88,8 +88,9 @@ const DECK = 6.8, SLOPE = 0.06;
   const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] > heap[m][0]) m = l; if (r < heap.length && heap[r][0] > heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
   const raise = (ri, i, h) => { const r = roads[ri]; if (!r.y) r.y = new Float32Array(r.pts.length); if (h > r.y[i] + 0.01) { r.y[i] = h; push([h, ri, i]); } };
   for (const [layer, over, x0, z0, x1, z1] of (window.BRIDGES || [])) {
+    if (!over) continue; // bridges over canals stay at road level: the game draws no canal under them
     const ri = byEnds.get(vkey(x0, z0) + ':' + vkey(x1, z1)); if (ri === undefined) continue;
-    const r = roads[ri], h = over ? DECK * Math.min(layer, 2) : 0.7; r.bridge = h;
+    const r = roads[ri], h = DECK * Math.min(layer, 2); r.bridge = h;
     r.pts.forEach((_, i) => raise(ri, i, h));
   }
   // a ramp climbs every road that meets the bridge or its ramp (slip roads, the street carrying on), at 6 %, so no
@@ -437,7 +438,10 @@ const roadMat = new THREE.MeshStandardMaterial({ map: asphaltTex, vertexColors: 
 const dirtRoadMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide }); // rues en sable tasse
 const sideMat = new THREE.MeshStandardMaterial({ map: asphaltTex, vertexColors: true, roughness: 0.9, side: THREE.DoubleSide });
 // the scanned asphalt is a dark fresh tarmac; Dakar roads are sun-bleached and dusty, so the albedo is lifted (linear > 1)
-pbr(roadMat, 'worn_asphalt', { tint: new THREE.Color(2.7, 2.75, 2.95) }); // grey like the Street View tarmac, not brown pbr(dirtRoadMat, 'sand_02', { normal: 0.8, tint: new THREE.Color(1.35, 1.3, 1.25) }); pbr(sideMat, 'interlocking_concrete_pavers', { tint: new THREE.Color(2.2, 2.1, 2.0), repeat: 3 });
+for (const [m, f] of [[roadMat, -1.5], [dirtRoadMat, -1.5], [sideMat, -1]]) { m.polygonOffset = true; m.polygonOffsetFactor = f; m.polygonOffsetUnits = f; }
+pbr(roadMat, 'worn_asphalt', { tint: new THREE.Color(2.6, 2.6, 2.65) }); // grey like the Street View tarmac, not brown
+roadMat.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+  diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(.3, .55, .15))), diffuseColor.rgb, .25); // the scanned tarmac is brown: keep a hint of it`); }; pbr(dirtRoadMat, 'sand_02', { normal: 0.8, tint: new THREE.Color(1.35, 1.3, 1.25) }); pbr(sideMat, 'interlocking_concrete_pavers', { tint: new THREE.Color(2.2, 2.1, 2.0), repeat: 3 });
 pbr(shopMat, 'painted_metal_shutter', { diff: false, rough: false, normal: 0.4 });
 // sand drift texture: u = across (0 at the curb, 1 toward the lane), v = along the road; ragged inner edge
 const sandEdgeTex = canvasTex(128, 256, (g, w, h) => {
@@ -660,6 +664,14 @@ function prism(B, ax, az, bx, bz, o, hw, ta, tb, ba, bb, colHex) {
     for (const v of [p, q, r, p, r, s]) { B.pos.push(...v); B.nor.push(...n); B.uv.push(0.01, 0.01); B.col.push(c.r, c.g, c.b); } };
   quad(A0, B0, B3, A3); quad(B1, A1, A2, B2); quad(A3, B3, B2, A2); quad(A1, B1, B0, A0); quad(A1, A0, A3, A2); quad(B0, B1, B2, B3);
 }
+// is this vertex of road r inside another road's carriageway? (junctions: no sand strip across the crossing street)
+function onOtherRoad(r, i) {
+  const [x, z] = r.pts[i], gx = cellOf(x), gz = cellOf(z);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const s = segGrid.get(ckey(gx + a, gz + b)); if (!s) continue;
+    for (let j = 0; j < s.length; j += 2) { const o = roads[s[j]]; if (o === r || o.t > 8) continue; const k = s[j + 1], [ax, az] = o.pts[k], [bx, bz] = o.pts[k + 1], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1);
+      if (Math.hypot(x - ax - dx * t, z - az - dz * t) < o.w / 2 + r.w / 2 + 1) return true; } }
+  return false;
+}
 function groundRoadNear(x, z, m) {
   const gx = cellOf(x), gz = cellOf(z);
   for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const s = segGrid.get(ckey(gx + a, gz + b)); if (!s) continue;
@@ -875,7 +887,7 @@ function buildChunk(gx, gz) {
       const RR = dirt ? DR : R; ribbon(RR.pos, RR.col, RR.uv, r.pts, i, i + 1, r.w / 2, y, color, r.y);
       if (up) bridgeSeg(BR, cols, r, i, y); // tablier / rampe : garde-corps et piliers, pas de trottoir ni de sable
       else if (r.t === 0 && r.ow) motorwayEdges(BR, cols, r, i, y);
-      if (!up && !dirt && r.t >= 1 && r.t <= 8) { const sw = r.t <= 2 ? 0.7 : r.t <= 4 ? 1.3 : rand(1.4, 2.4); sandEdge(SE, r.pts, r.cum, i, r.w / 2 + 0.05, Math.max(0.6, r.w / 2 - sw), y + 0.01); }
+      if (!up && !dirt && r.t >= 1 && r.t <= 8 && !onOtherRoad(r, i) && !onOtherRoad(r, i + 1)) { const sw = r.t <= 2 ? 0.7 : r.t <= 4 ? 1.3 : rand(1.4, 2.4); sandEdge(SE, r.pts, r.cum, i, r.w / 2 + 0.05, Math.max(0.6, r.w / 2 - sw), y + 0.01); }
       if (!up && r.side > 0.5 && !dirt) ribbon(S.pos, S.col, S.uv, r.pts, i, i + 1, r.w / 2 + r.side, 0.1, side);
       // markings
       if (r.t <= 4 && !dirt) {
@@ -906,7 +918,11 @@ function buildChunk(gx, gz) {
 
   // buildings: OSM
   const B = { pos: [], nor: [], uv: [], col: [], shop: { pos: [], nor: [], uv: [], col: [] } }, GL = { pos: [], nor: [], uv: [], col: [] }, RF = { tanks: [], dishes: [], rebar: [], lines: [] };
-  const ids = bGrid.get(k) || [], walls = [], BG = [];
+  const ids = bGrid.get(k) || [], walls = [], BG = [], houses = [], parks = [], stel = [];
+  const near = lieuxNear(gx, gz), mosqs = near.filter(o => o.kind === 'mosquee'), schools = near.filter(o => o.kind === 'ecole'), usedM = new Set();
+  const big = mosqs.filter(o => o.model); // great mosques placed whole: their ground is cleared of other footprints
+  const open = near.filter(o => o.pts && ((o.kind === 'vert' && o.t !== 1) || o.kind === 'cimetiere' || o.kind === 'ecole'));
+  const inOpenLieu = (x, z) => open.some(o => x > o.minx && x < o.maxx && z > o.minz && z < o.maxz && inPoly(x, z, o.pts)); // no made-up houses in parks, cemeteries, school yards
   for (const bi of ids) {
     const [lv, kind, flat] = D.buildings[bi]; const pts = []; let x = 0, z = 0;
     for (let i = 0; i < flat.length; i += 2) { x += flat[i]; z += flat[i + 1]; pts.push([x, z]); }
@@ -916,15 +932,23 @@ function buildChunk(gx, gz) {
       if (moved < 0) continue;
       let ar = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; ar += x1 * z2 - x2 * z1; } if (Math.abs(ar) < 12) continue;
     }
-    const st = styleAt(x, z);
+    const st = styleAt(x, z), bcx = pts.reduce((a, p) => a + p[0], 0) / pts.length, bcz = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+    if (big.some(o => Math.abs(bcx - o.cx) < o.size[0] * 0.6 && Math.abs(bcz - o.cz) < o.size[1] * 0.6)) continue;
+    { // mosque: OSM building tagged so, or footprint holding a mosque point -> one of the Blender mosques fitted to it
+      const mp = mosqs.find(o => !o.model && !usedM.has(o) && bcx > o.cx - 60 && bcx < o.cx + 60 && bcz > o.cz - 60 && bcz < o.cz + 60 && (o.pts ? inPoly(bcx, bcz, o.pts) : inPoly(o.cx, o.cz, pts)));
+      if (kind === 1 || mp) { if (mp) usedM.add(mp); const n = mosqueModel(mp && mp.name, Math.max(polyArea(pts), mp ? mp.area : 0)), f = fitOriented(n, obb(pts), mosqueCol(n));
+        if (f) { houses.push(f); const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]); cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) }); continue; } } }
+    const school = schools.find(o => bcx > o.minx && bcx < o.maxx && bcz > o.minz && bcz < o.maxz && inPoly(bcx, bcz, o.pts));
     let h;
-    if (kind === 1) h = 11; else if (lv) h = lv * 3.1; else h = 3.1 * storeys(st);
-    if (st === STYLES.plateau && h >= 18 && kind !== 1 && Math.random() < 0.4) addBuilding(GL, pts, h, pick([0xffffff, 0xe6eef0, 0xf0ebe0]), 0xb9b0a0);
-    else { const fc = kind === 1 ? 0xf4f1ea : facadeOf(st), sh = kind !== 1 && Math.random() < st.shops; addBuilding(B, pts, h, fc, 0xb9b0a0, sh); if (kind !== 1) buildingDetails(B, pts, h, fc, sh, st); }
-    if (kind !== 1 && Math.random() < st.roof) roofExtras(B, RF, pts, h, h > 13, st.chantier);
+    if (kind === 1) h = 11; else if (lv) h = lv * 3.1; else h = 3.1 * (school ? clamp(storeys(st), 1, 2) : storeys(st));
+    const fit = kind !== 1 && !lv && !school && Math.random() < 0.6 ? fitHouse(pts, st) : null;
+    if (fit) houses.push(fit);
+    else if (st === STYLES.plateau && h >= 18 && kind !== 1 && Math.random() < 0.4) addBuilding(GL, pts, h, pick([0xffffff, 0xe6eef0, 0xf0ebe0]), 0xb9b0a0);
+    else { const fc = kind === 1 ? 0xf4f1ea : school ? pick([0xf2d48a, 0xe9c77e, 0xf4efe6, 0xe8b98a]) : facadeOf(st), sh = !school && kind !== 1 && Math.random() < st.shops; addBuilding(B, pts, h, fc, 0xb9b0a0, sh); if (kind !== 1) buildingDetails(B, pts, h, fc, sh, st); }
+    if (!fit && !school && kind !== 1 && Math.random() < st.roof) roofExtras(B, RF, pts, h, h > 13, st.chantier);
     const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
     cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
-    if (kind !== 1 && h < 8 && st.wall && Math.random() < st.wall) walls.push([pts, st]);
+    if (kind !== 1 && !school && h < 8 && st.wall && Math.random() < st.wall) walls.push([pts, st]);
     if (kind === 1) { // minaret on mosques, height from footprint size
       let area = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; area += x1 * z2 - x2 * z1; } area = Math.abs(area / 2);
       if (area > 300) addMinaret(group, (Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2, clamp(Math.sqrt(area) * 0.9, 18, 87), area);
@@ -945,14 +969,16 @@ function buildChunk(gx, gz) {
           const wAlong = real ? PROP_CFG[real].len : rand(7, 12), depth = real ? PROP_CFG[real].len * 0.8 : rand(8, 13), off = r.w / 2 + r.side + 0.8 + depth / 2;
           const cx = ax + ux * d - uz * off * s, cz = az + uz * d + ux * off * s;
           const ok = (() => { const okey = Math.round(cx / 6) + ',' + Math.round(cz / 6); if (occ.has(okey)) return false;
-            if (isWater(cx, cz) || roadOverlap(cx, cz)) return false;
+            if (isWater(cx, cz) || roadOverlap(cx, cz) || inOpenLieu(cx, cz)) return false;
             for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1]]) { const hx = a * wAlong / 2, hz = b * depth / 2; if (roadOverlap(cx + ux * hx - uz * hz, cz + uz * hx + ux * hz)) return false; }
             for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) occ.add((Math.round(cx / 6) + a) + ',' + (Math.round(cz / 6) + b)); return true; })();
           if (!ok) continue;
           const hw = wAlong / 2, hd = depth / 2, pts = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([a, b]) => [cx + ux * a - uz * b, cz + uz * a + ux * b]);
           const st = styleAt(cx, cz), fl = storeys(st);
           const faceRoad = Math.atan2(uz * s, -ux * s); // model front (+z) toward the road
-          if (real && PROPS[real]) placeProp(group, real, cx, cz, faceRoad);
+          const fit = !real && Math.random() < 0.5 ? fitHouse(pts, st) : null;
+          if (fit) houses.push(fit);
+          else if (real && PROPS[real]) placeProp(group, real, cx, cz, faceRoad);
           else { const fc = facadeOf(st), sh = Math.random() < st.shops; addBuilding(B, pts, fl * 3.1, fc, 0xb5ab9a, sh); buildingDetails(B, pts, fl * 3.1, fc, sh, st); if (Math.random() < st.roof) roofExtras(B, RF, pts, fl * 3.1, false, st.chantier); }
           const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
           cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
@@ -963,12 +989,56 @@ function buildChunk(gx, gz) {
       }
     }
   }
+  { // lieux whose centre is in this chunk
+    const own = lieuGrid.get(k) || [];
+    const rectCol = p => cols.push({ pts: p, minx: Math.min(...p.map(q => q[0])), maxx: Math.max(...p.map(q => q[0])), minz: Math.min(...p.map(q => q[1])), maxz: Math.max(...p.map(q => q[1])) });
+    for (const o of own) {
+      if (o.kind === 'mosquee' && !usedM.has(o)) {
+        if (o.model) { // great mosque, placed whole, facing its street
+          const nr = nearestRoad(o.cx, o.cz, 2), rot = nr ? Math.atan2(nr.x - o.cx, nr.z - o.cz) : 0, c = Math.cos(rot), sn = Math.sin(rot), [w, d] = o.size;
+          houses.push({ n: o.model, x: o.cx, z: o.cz, rot, sx: 1, sy: 1, sz: 1, col: mosqueCol(o.model) });
+          rectCol([[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]].map(([a, b]) => [o.cx + a * c + b * sn, o.cz - a * sn + b * c])); continue; }
+        // mosque mapped only as a point: a neighbourhood mosque there if the ground is free
+        const nr = nearestRoad(o.cx, o.cz, 1); if (!nr) continue; const rot = Math.atan2(nr.x - o.cx, nr.z - o.cz), c = Math.cos(rot), sn = Math.sin(rot);
+        const p = [[-6.5, -8.5], [6.5, -8.5], [6.5, 8.5], [-6.5, 8.5]].map(([a, b]) => [o.cx + a * c + b * sn, o.cz - a * sn + b * c]);
+        if (p.concat([[o.cx, o.cz]]).some(([x, z]) => roadOverlap(x, z, 0) || cols.some(q => x > q.minx && x < q.maxx && z > q.minz && z < q.maxz && inPoly(x, z, q.pts)))) continue;
+        houses.push({ n: 'mosquee_quartier', x: o.cx, z: o.cz, rot, sx: 1, sy: 1, sz: 1, col: mosqueCol('mosquee_quartier') }); rectCol(p);
+      } else if (o.kind === 'ecole') { // mur peint avec bandeau, portail vert, drapeau du Senegal dans la cour
+        const gp = enclosure(B, cols, o.pts, 2.3, pick([0xf2e6c8, 0xf4efe6, 0xefd9a8]), pick([0x2a5d8f, 0x2f8f5a, 0xc0392b]), 0x2f6b43);
+        if (gp) { let x = gp.x - gp.uz * 4, z = gp.z + gp.ux * 4; if (!inPoly(x, z, o.pts)) { x = gp.x + gp.uz * 4; z = gp.z - gp.ux * 4; }
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 8, 6).translate(0, 4, 0), poleMat); pole.position.set(x, 0, z); group.add(pole);
+          const fl = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1).translate(0.78, 7.4, 0), flagMat); fl.position.set(x, 0, z); fl.rotation.y = rand(0, 6); group.add(fl); }
+      } else if (o.kind === 'vert') {
+        const A = polyArea(o.pts);
+        if (o.t === 1) { // terrain de foot en sable, buts aux deux bouts
+          const b = obb(o.pts);
+          if (b && A / (b.a * b.b) > 0.8 && b.a > 12 && b.b > 8) { const long = b.a > b.b, ax = long ? b.u : b.v, pg = new THREE.Group(); pg.position.set(b.cx, 0, b.cz); pg.rotation.y = Math.atan2(ax[0], ax[1]); group.add(pg);
+            const W = Math.min(b.a, b.b), Lp = Math.max(b.a, b.b), f = new THREE.Mesh(new THREE.PlaneGeometry(W, Lp), pitchMat); f.rotation.x = -Math.PI / 2; f.position.y = 0.07; f.receiveShadow = true; pg.add(f);
+            for (const sz of [-1, 1]) { const gl = new THREE.Mesh(G.goal, poleMat); gl.position.z = sz * (Lp / 2 - 1); pg.add(gl); } }
+          else groundPoly(group, o.pts, cemeteryMat);
+          continue; }
+        if (A < 60) continue; groundPoly(group, o.pts, parkMat);
+        for (let n = Math.min(70, A / 160); n > 0; n--) { const q = randIn(o); if (q && !roadOverlap(q[0], q[1], 1)) (Math.random() < 0.3 ? palms : neems).push(q); }
+        parks.push(o);
+      } else if (o.kind === 'cimetiere') { // mur blanc, steles blanches et vertes
+        groundPoly(group, o.pts, cemeteryMat); enclosure(B, cols, o.pts, 1.9, 0xf1ece0, null, 0x1f1f22);
+        for (let n = Math.min(320, polyArea(o.pts) / 10); n > 0; n--) { const q = randIn(o); if (q) stel.push([q[0], q[1], rand(-0.3, 0.3)]); }
+      }
+    }
+  }
   { const foot = cols.slice(); for (const [pts, st] of walls) addCompoundWall(B, cols, BG, pts, st, foot); }
   if (B.pos.length) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(B.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(B.nor, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(B.uv, 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(B.col, 3));
     const m = new THREE.Mesh(g, bldMat); m.castShadow = Q.bshadow; m.receiveShadow = Q.shadow > 0; group.add(m);
+  }
+  { // maisons types, one InstancedMesh per model
+    const o = new THREE.Object3D(), c = new THREE.Color();
+    for (const n of Object.keys(HOUSE_GEO)) { const list = houses.filter(h => h.n === n); if (!list.length || !HOUSE_GEO[n]) continue;
+      const im = new THREE.InstancedMesh(HOUSE_GEO[n], houseMat, list.length);
+      list.forEach((h, i) => { o.position.set(h.x, 0, h.z); o.rotation.set(0, h.rot, 0); o.scale.set(h.sx, h.sy, h.sz); o.updateMatrix(); im.setMatrixAt(i, o.matrix); im.setColorAt(i, c.set(h.col)); });
+      im.computeBoundingSphere(); im.castShadow = Q.bshadow; im.receiveShadow = Q.shadow > 0; group.add(im); }
   }
   if (BR.pos.length) {
     const g = new THREE.BufferGeometry();
@@ -990,6 +1060,8 @@ function buildChunk(gx, gz) {
   }
   // instanced props
   const inst = (geo, mat, list, fn, shadow = true) => { if (!list.length) return; const im = new THREE.InstancedMesh(geo, mat, list.length); const o = new THREE.Object3D(); list.forEach((p, i) => { fn(o, p); o.updateMatrix(); im.setMatrixAt(i, o.matrix); }); im.castShadow = shadow; group.add(im); return im; };
+  { const sm = inst(G.stele, steleMat, stel, (o, [x, z, r]) => { o.position.set(x, 0, z); o.rotation.set(0, r, 0); o.scale.set(1, rand(0.8, 1.3), 1); }, false); // steles des cimetieres
+    if (sm) { const c = new THREE.Color(); stel.forEach((_, i) => sm.setColorAt(i, c.set(pick([0xf4f1ea, 0xe8e2d4, 0x2f8f5a, 0xd9cfbd])))); } }
   { // toits : citernes, paraboles, fers d'attente, linge
     const tk = inst(G.tank, tankMat, RF.tanks, (o, [x, y, z]) => { o.position.set(x, y, z); o.rotation.set(0, rand(0, 6), 0); const k = rand(0.85, 1.15); o.scale.set(k, k, k); }, Q.bshadow);
     if (tk) { const c = new THREE.Color(); RF.tanks.forEach((t, i) => tk.setColorAt(i, c.set(t[3] ? 0x1c1c1e : pick([0xe8e8e2, 0x3d6fb0, 0xd9c48a])))); }
@@ -1039,6 +1111,7 @@ function buildChunk(gx, gz) {
       for (let k = 0; k < 4; k++) { const f = Math.random(), sd = Math.random() < .5 ? 1 : -1, L = Math.hypot(bx - ax, bz - az) || 1, off = r.w / 2 + rand(2.5, 9);
         const x = ax + (bx - ax) * f - (bz - az) / L * off * sd, z = az + (bz - az) * f + (bx - ax) / L * off * sd;
         if (!isWater(x, z) && !roadOverlap(x, z, 0.3) && !cols.some(c => x > c.minx && x < c.maxx && z > c.minz && z < c.maxz)) tufts.push([x, z]); } } }
+    for (const o of parks) for (let n = Math.min(260, polyArea(o.pts) / 25); n > 0; n--) { const q = randIn(o); if (q && !roadOverlap(q[0], q[1], 0.3)) tufts.push(q); } // herbe haute des jardins
     const gm = inst(G.grass, grassMat, tufts, (o, [x, z]) => { o.position.set(x, 0.05, z); o.rotation.set(0, rand(0, 6), 0); const s = rand(0.7, 1.6); o.scale.set(s, s * rand(.8, 1.3), s); }, false); if (gm) gm.receiveShadow = true; }
   const flats = [];
   if (Math.random() < (outsideDakar(gx * CELL) ? 0.15 : 0.35)) for (let tries = 0; tries < 12; tries++) {
@@ -1101,6 +1174,77 @@ function buildChunk(gx, gz) {
   return { k, group, tl: tlObjs, hgrid };
 }
 function nearTown(x, z) { for (const p of places) if (Math.abs(p.x - x) < 1500 && Math.abs(p.z - z) < 1500) return true; return false; }
+// ---------------- Lieux reels : mosquees, ecoles, parcs, terrains, cimetieres (tools/lieux.mjs) ----------------
+const unflat = f => { const p = []; let x = 0, z = 0; for (let i = 0; i < f.length; i += 2) { x += f[i]; z += f[i + 1]; p.push([x, z]); } return p; };
+const lieuGrid = new Map(); // ckey -> features whose centre is in that chunk
+function addLieu(o) {
+  if (o.pts) { const xs = o.pts.map(p => p[0]), zs = o.pts.map(p => p[1]); o.minx = Math.min(...xs); o.maxx = Math.max(...xs); o.minz = Math.min(...zs); o.maxz = Math.max(...zs); o.cx ??= (o.minx + o.maxx) / 2; o.cz ??= (o.minz + o.maxz) / 2; }
+  const k = ckey(cellOf(o.cx), cellOf(o.cz)); let a = lieuGrid.get(k); if (!a) lieuGrid.set(k, a = []); a.push(o);
+}
+{ const L = window.LIEUX || { verts: [], ecoles: [], mosquees: [], cimetieres: [] };
+  for (const [t, ...f] of L.verts) addLieu({ kind: 'vert', t, pts: unflat(f) });
+  for (const [name, ...f] of L.ecoles) addLieu({ kind: 'ecole', name, pts: unflat(f) });
+  for (const [rel, ...f] of L.cimetieres) addLieu({ kind: 'cimetiere', rel, pts: unflat(f) });
+  for (const [name, x, z, area, ...f] of L.mosquees) addLieu({ kind: 'mosquee', name, cx: x, cz: z, area, pts: f.length >= 6 ? unflat(f) : null });
+  // the two great mosques OSM only has as points: real positions and sizes
+  for (const [name, la, lo, model, w, d] of [['Grande Mosquée de Touba', 14.8611, -15.8757, 'mosquee_touba', 96, 84], ['Grande Mosquée de Dakar', 14.6744, -17.4447, 'mosquee_grande', 44, 48]]) {
+    const [x, z] = ll(la, lo); addLieu({ kind: 'mosquee', name, cx: x, cz: z, area: w * d, model, size: [w, d], pts: null }); }
+}
+const lieuxNear = (gx, gz) => { const o = []; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) o.push(...(lieuGrid.get(ckey(gx + a, gz + b)) || [])); return o; };
+// oriented bounding box of a footprint: the edge direction that gives the smallest box
+function obb(pts) {
+  let best = null;
+  for (let i = 0; i < pts.length; i++) { const [ax, az] = pts[i], [bx, bz] = pts[(i + 1) % pts.length], L = Math.hypot(bx - ax, bz - az); if (L < 1) continue;
+    const u = [(bx - ax) / L, (bz - az) / L], v = [-u[1], u[0]]; let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
+    for (const [x, z] of pts) { const pu = x * u[0] + z * u[1], pv = x * v[0] + z * v[1]; u0 = Math.min(u0, pu); u1 = Math.max(u1, pu); v0 = Math.min(v0, pv); v1 = Math.max(v1, pv); }
+    const A = (u1 - u0) * (v1 - v0); if (!best || A < best.A) best = { A, u, v, a: u1 - u0, b: v1 - v0, cx: u[0] * (u0 + u1) / 2 + v[0] * (v0 + v1) / 2, cz: u[1] * (u0 + u1) / 2 + v[1] * (v0 + v1) / 2 }; }
+  return best;
+}
+// a model on an oriented box, entrance toward the nearest street (mosques accept any reasonable scale)
+function fitOriented(n, o, col, kmin = 0.35, kmax = 3.5) {
+  const g = HOUSE_GEO[n]; if (!g || !o) return null; const S = g.userData.size, opts = [];
+  for (const [fx, fz, w, d] of [[o.v[0], o.v[1], o.a, o.b], [-o.v[0], -o.v[1], o.a, o.b], [o.u[0], o.u[1], o.b, o.a], [-o.u[0], -o.u[1], o.b, o.a]]) {
+    const kx = w / S.x, kz = d / S.z; if (kx < kmin || kx > kmax || kz < kmin || kz > kmax) continue;
+    const nr = nearestRoad(o.cx + fx * d / 2, o.cz + fz * d / 2, 1); opts.push({ fx, fz, kx, kz, d: nr ? nr.d : 1e3 }); }
+  if (!opts.length) return null; opts.sort((p, q) => p.d - q.d); const b = opts[0];
+  return { n, x: o.cx, z: o.cz, rot: Math.atan2(b.fx, b.fz), sx: b.kx, sy: clamp(Math.sqrt(b.kx * b.kz), 0.7, 1.3), sz: b.kz, col };
+}
+const mosqueModel = (name, area) => /divinit/i.test(name || '') ? 'mosquee_divinite' : area > 5000 || /massalik/i.test(name || '') ? 'mosquee_grande' : 'mosquee_quartier';
+const mosqueCol = n => n === 'mosquee_touba' ? 0xe8cfc0 : n === 'mosquee_quartier' ? pick([0xf4f1ea, 0xf4f1ea, 0xeee6cf, 0xe3efe2]) : 0xf4f1ea;
+// Senegal flag (green, yellow with a green star, red) for the schools
+const flagTex = canvasTex(96, 64, (g) => { g.fillStyle = '#00853f'; g.fillRect(0, 0, 32, 64); g.fillStyle = '#fdef42'; g.fillRect(32, 0, 32, 64); g.fillStyle = '#e31b23'; g.fillRect(64, 0, 32, 64);
+  g.fillStyle = '#00853f'; g.beginPath(); for (let i = 0; i < 10; i++) { const r = i % 2 ? 4 : 10, a = -Math.PI / 2 + i * Math.PI / 5; g.lineTo(48 + Math.cos(a) * r, 32 + Math.sin(a) * r); } g.fill(); }, false);
+const flagMat = new THREE.MeshStandardMaterial({ map: flagTex, side: THREE.DoubleSide, roughness: 0.9 });
+// depth priority on the flat ground: markings (-2) > roads (-1.5) > sidewalks (-1) > lawns and cemeteries (-0.5)
+const parkMat = new THREE.MeshStandardMaterial({ map: sandTex, color: 0x7f9d48, roughness: 1, polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -0.5 });
+const cemeteryMat = new THREE.MeshStandardMaterial({ map: sandTex, color: 0xd8c9a8, roughness: 1, polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -0.5 });
+const steleMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
+// flat ground patch on an outline (parks, cemeteries), facing up whatever the outline's winding
+function groundPoly(group, pts, mat, y = 0.05) {
+  try { let tris = THREE.ShapeUtils.triangulateShape(pts.map(([x, z]) => new THREE.Vector2(x, z)), []); const pos = [], uv = [];
+    const up = (a, b, c) => (pts[b][1] - pts[a][1]) * (pts[c][0] - pts[a][0]) - (pts[b][0] - pts[a][0]) * (pts[c][1] - pts[a][1]) > 0;
+    for (const t of tris) for (const k of (up(...t) ? t : [t[0], t[2], t[1]])) { pos.push(pts[k][0], y, pts[k][1]); uv.push(pts[k][0] / 8, pts[k][1] / 8); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mat); m.receiveShadow = true; group.add(m); } catch (e) { }
+}
+const polyArea = pts => { let a = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; a += x1 * z2 - x2 * z1; } return Math.abs(a / 2); };
+function randIn(o) { for (let t = 0; t < 12; t++) { const x = rand(o.minx, o.maxx), z = rand(o.minz, o.maxz); if (inPoly(x, z, o.pts)) return [x, z]; } return null; }
+// enclosure wall along an outline (schools, cemeteries): skips stretches on a road, gate on the side nearest a street
+function enclosure(B, cols, pts, H, col, band, gateCol) {
+  if (pts.length > 60) return null; let gate = -1, gd = 1e9, gp = null;
+  pts.forEach(([x, z], i) => { const [x2, z2] = pts[(i + 1) % pts.length]; if (Math.hypot(x2 - x, z2 - z) < 6) return; const n = nearestRoad((x + x2) / 2, (z + z2) / 2, 1); if (n && n.d < gd) { gd = n.d; gate = i; } });
+  for (let i = 0; i < pts.length; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[(i + 1) % pts.length], L = Math.hypot(bx - ax, bz - az); if (L < 0.5) continue;
+    const ux = (bx - ax) / L, uz = (bz - az) / L, parts = i === gate ? [[0, L / 2 - 2], [L / 2 + 2, L]] : [[0, L]];
+    if (i === gate) { const g0 = [ax + ux * (L / 2 - 2), az + uz * (L / 2 - 2)], g1 = [ax + ux * (L / 2 + 2), az + uz * (L / 2 + 2)]; strip(B, ...g0, ...g1, 0, 0.05, H - 0.1, 0.05, gateCol, 'lrt'); gp = { x: (g0[0] + g1[0]) / 2, z: (g0[1] + g1[1]) / 2, ux, uz }; }
+    for (const [s0, s1] of parts) { if (s1 - s0 < 0.5) continue; const x0 = ax + ux * s0, z0 = az + uz * s0, x1 = ax + ux * s1, z1 = az + uz * s1;
+      if (roadOverlap(x0, z0, -0.3) || roadOverlap(x1, z1, -0.3) || roadOverlap((x0 + x1) / 2, (z0 + z1) / 2, -0.3)) continue;
+      strip(B, x0, z0, x1, z1, 0, 0.12, H, 0, col, 'lrt'); if (band) strip(B, x0, z0, x1, z1, 0, 0.13, H - 0.05, H - 0.45, band, 'lr');
+      const ox = -uz * 0.15, oz = ux * 0.15, wp = [[x0 + ox, z0 + oz], [x1 + ox, z1 + oz], [x1 - ox, z1 - oz], [x0 - ox, z0 - oz]];
+      cols.push({ pts: wp, minx: Math.min(x0, x1) - 0.2, maxx: Math.max(x0, x1) + 0.2, minz: Math.min(z0, z1) - 0.2, maxz: Math.max(z0, z1) + 0.2 }); }
+  }
+  return gp;
+}
 const G = (() => {
   const pole = mergeGeometries([new THREE.CylinderGeometry(0.09, 0.13, 8, 6).translate(0, 4, 0), new THREE.BoxGeometry(0.08, 0.08, 2.4).translate(0, 7.9, 1.1)]);
   const lamp = new THREE.BoxGeometry(0.35, 0.12, 0.8).translate(0, 7.82, 2.2);
@@ -1131,7 +1275,8 @@ const G = (() => {
   const tank = mergeGeometries([new THREE.CylinderGeometry(0.55, 0.5, 1.25, 12).translate(0, 0.78, 0), new THREE.CylinderGeometry(0.22, 0.3, 0.16, 10).translate(0, 1.48, 0), new THREE.BoxGeometry(0.9, 0.15, 0.9).translate(0, 0.08, 0)]);
   const dish = mergeGeometries([new THREE.CylinderGeometry(0.03, 0.03, 0.9, 5).translate(0, 0.45, 0), new THREE.SphereGeometry(0.42, 10, 5, 0, Math.PI * 2, 0, 0.9).rotateX(-1.2).translate(0, 0.95, 0.12)]);
   const cloth = new THREE.PlaneGeometry(0.55, 0.75).translate(0, -0.38, 0);
-  return { tank, dish, cloth, pole, upole, grass, bush, goal, player, lamp, glow, trunk, crown, neemT, neem, carBody, carTop, stall, parasol, pile };
+  const stele = new THREE.BoxGeometry(0.35, 0.55, 0.07).translate(0, 0.27, 0);
+  return { tank, dish, cloth, pole, upole, grass, bush, goal, player, lamp, glow, trunk, crown, neemT, neem, carBody, carTop, stall, parasol, pile, stele };
 })();
 function addMinaret(group, x, z, h, area) {
   const white = new THREE.MeshStandardMaterial({ color: 0xf2ece0, roughness: 0.7 }), green = new THREE.MeshStandardMaterial({ color: 0x2f8f5a, roughness: 0.4, metalness: 0.2 });
@@ -1216,6 +1361,55 @@ const CAR_CFG = {
 };
 const PROP_CFG = { kiosque_om: { len: 2.6 }, cafe: { len: 2.4 }, fruitcart: { len: 2.4 }, maison: { len: 13 }, maisonbasket: { len: 18 } };
 const MODELS = {}, PROPS = {};
+// ---------------- Maisons types (tools/maisons_blender.py) ----------------
+// Each Blender house becomes one geometry with per-vertex colours, drawn as an InstancedMesh per chunk. The
+// "Facade" material is baked white and flagged, so the instance colour paints only the walls (shutters,
+// iron, glass and tarps keep their colours).
+const HOUSE_GEO = { maison_r1: null, villa: null, immeuble_medina: null, mosquee_quartier: null, mosquee_grande: null, mosquee_divinite: null, mosquee_touba: null };
+function houseGeometry(root) {
+  root.updateMatrixWorld(true); const parts = [];
+  root.traverse(o => { if (!o.isMesh) return; const mats = Array.isArray(o.material) ? o.material : [o.material];
+    let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
+    const groups = g.groups.length ? g.groups : [{ start: 0, count: g.attributes.position.count, materialIndex: 0 }], n = g.attributes.position.count;
+    const col = new Float32Array(n * 3), fac = new Float32Array(n);
+    for (const gr of groups) { const m = mats[gr.materialIndex] || mats[0], isF = /^Facade/.test(m.name || ''), c = isF ? new THREE.Color(1, 1, 1) : m.color;
+      for (let i = gr.start; i < gr.start + gr.count; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; fac[i] = isF ? 1 : 0; } }
+    for (const a of Object.keys(g.attributes)) if (!['position', 'normal'].includes(a)) g.deleteAttribute(a);
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('facade', new THREE.Float32BufferAttribute(fac, 1)); g.clearGroups(); parts.push(g); });
+  const g = mergeGeometries(parts); g.computeBoundingBox(); const b = g.boundingBox, c = b.getCenter(new THREE.Vector3());
+  g.translate(-c.x, -b.min.y, -c.z); g.computeBoundingBox(); g.computeBoundingSphere(); g.userData.size = g.boundingBox.getSize(new THREE.Vector3()); return g;
+}
+const houseMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+houseMat.onBeforeCompile = (sh) => {
+  sh.vertexShader = 'attribute float facade;\n' + sh.vertexShader.replace('#include <color_vertex>', `
+    vColor = vec3(1.0);
+    vColor *= color.xyz;
+    #ifdef USE_INSTANCING_COLOR
+      vColor.xyz *= mix(vec3(1.0), instanceColor.xyz, facade);
+    #endif`);
+};
+// which house types suit a neighbourhood (from the Street View survey)
+const HOUSE_OF = new Map([['plateau', ['immeuble_medina']], ['medina', ['immeuble_medina', 'immeuble_medina', 'maison_r1']], ['sicap', ['maison_r1', 'maison_r1', 'villa']],
+  ['villa', ['villa', 'villa', 'maison_r1']], ['banlieue', ['maison_r1']], ['touba', ['maison_r1']], ['diourbel', ['maison_r1']], ['rufisque', ['maison_r1', 'immeuble_medina']], ['village', ['maison_r1']]]);
+const styleName = st => Object.keys(STYLES).find(k => STYLES[k] === st);
+// fit a house model to a rectangular OSM footprint (or a generated plot): scale to it, front toward the street
+function fitHouse(pts, st, list) {
+  if (pts.length !== 4) return null;
+  const e = [0, 1, 2, 3].map(i => [pts[(i + 1) % 4][0] - pts[i][0], pts[(i + 1) % 4][1] - pts[i][1]]), len = e.map(v => Math.hypot(...v));
+  for (let i = 0; i < 4; i++) if (Math.abs((e[i][0] * e[(i + 1) % 4][0] + e[i][1] * e[(i + 1) % 4][1]) / (len[i] * len[(i + 1) % 4] || 1)) > 0.2) return null; // not a rectangle
+  const a = (len[0] + len[2]) / 2, b = (len[1] + len[3]) / 2, u = [e[0][0] / len[0], e[0][1] / len[0]], v = [-u[1], u[0]];
+  const cx = pts.reduce((s, p) => s + p[0], 0) / 4, cz = pts.reduce((s, p) => s + p[1], 0) / 4;
+  const n = pick(HOUSE_OF.get(styleName(st)) || ['maison_r1']), g = HOUSE_GEO[n]; if (!g) return null;
+  const S = g.userData.size, opts = [];
+  // front along +/-v (model x along u) or +/-u (model x along v)
+  for (const [fx, fz, w, d] of [[v[0], v[1], a, b], [-v[0], -v[1], a, b], [u[0], u[1], b, a], [-u[0], -u[1], b, a]]) {
+    const kx = w / S.x, kz = d / S.z; if (kx < 0.7 || kx > 1.45 || kz < 0.7 || kz > 1.45 || Math.max(kx / kz, kz / kx) > 1.4) continue;
+    const nr = nearestRoad(cx + fx * d / 2, cz + fz * d / 2, 1); if (!nr) continue;
+    opts.push({ fx, fz, kx, kz, d: nr.d });
+  }
+  if (!opts.length) return null; opts.sort((p, q) => p.d - q.d); const o = opts[0];
+  return { n, x: cx, z: cz, rot: Math.atan2(o.fx, o.fz), sx: o.kx, sy: Math.sqrt(o.kx * o.kz), sz: o.kz, col: n === 'villa' ? pick([0xf6f2ea, 0xf1ebe0, 0xefe6d6, 0xe9e2d6]) : facadeOf(st) };
+}
 function normalize(root, cfg) {
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root), size = box.getSize(new THREE.Vector3());
@@ -1258,6 +1452,7 @@ async function loadAll(progress) {
     ...names.map(n => loader.loadAsync(`models/${n}.glb`).then(g => { MODELS[n] = normalize(g.scene, CAR_CFG[n]); }).catch(e => console.warn('model', n, e)).finally(tick)),
     ...props.map(n => loader.loadAsync(`models/${n}.glb`).then(g => { PROPS[n] = normalize(g.scene, PROP_CFG[n]); }).catch(e => console.warn('prop', n, e)).finally(tick)),
     loader.loadAsync('models/Soldier.glb').then(g => { soldier = g; }).catch(e => console.warn(e)).finally(tick),
+    ...Object.keys(HOUSE_GEO).map(n => loader.loadAsync(`models/${n}.glb`).then(g => { HOUSE_GEO[n] = houseGeometry(g.scene); }).catch(e => console.warn('maison', n, e))),
   ]);
 }
 
