@@ -895,7 +895,7 @@ function buildChunk(gx, gz) {
   const k = ckey(gx, gz), group = new THREE.Group(), cols = [];
   const R = { pos: [], col: [], uv: [] }, S = { pos: [], col: [], uv: [] }, M = { pos: [], col: [], uv: [] }, SE = [], BR = { pos: [], nor: [], uv: [], col: [] }, DR = { pos: [], col: [], uv: [] };
   const segs = segGrid.get(k) || [];
-  const lamps = [], palms = [], neems = [];
+  const lamps = [], palms = [], neems = [], benches = [];
   const sandy = new THREE.Color(0xcfae80), aspA = new THREE.Color(0xd4d2ce), aspB = new THREE.Color(0xe0dbd2), aspC = new THREE.Color(0xc4c4c8), side = new THREE.Color(0xc4b8a2), white = new THREE.Color(1, 1, 1);
   // group consecutive segs of same road
   const byRoad = new Map();
@@ -927,8 +927,6 @@ function buildChunk(gx, gz) {
       // props along segment
       if (!up && r.t <= 3 && Math.random() < 0.55) {
         const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], f = Math.random(), x = ax + (bx - ax) * f, z = az + (bz - az) * f, h = Math.atan2(bx - ax, bz - az), s = Math.random() < 0.5 ? 1 : -1, off = r.w / 2 + Math.max(0.6, r.side - 0.5);
-        const px = x - Math.cos(h) * off * s, pz = z + Math.sin(h) * off * s;
-        if (!isWater(px, pz)) lamps.push([px, pz, h + (s > 0 ? Math.PI / 2 : -Math.PI / 2)]);
         if (!outsideDakar(x) && Math.random() < 0.5) { const qx = x + Math.cos(h) * (off + 1.5) * s, qz = z - Math.sin(h) * (off + 1.5) * s; const q = clearOfRoads(qx, qz, -1.2); if (q && !isWater(q[0], q[1])) palms.push(q); }
       }
       if (!up && r.t >= 3 && r.t <= 7 && Math.random() < (outsideDakar(r.pts[i][0]) ? 0.3 : 0.22)) {
@@ -946,6 +944,7 @@ function buildChunk(gx, gz) {
   const near = lieuxNear(gx, gz), mosqs = near.filter(o => o.kind === 'mosquee'), schools = near.filter(o => o.kind === 'ecole'), usedM = new Set();
   const big = mosqs.filter(o => o.model); // great mosques placed whole: their ground is cleared of other footprints
   const open = near.filter(o => o.pts && ((o.kind === 'vert' && o.t !== 1) || o.kind === 'cimetiere' || o.kind === 'ecole'));
+  const squares = near.filter(o => o.kind === 'place'), kiosks = [];
   const inOpenLieu = (x, z) => open.some(o => x > o.minx && x < o.maxx && z > o.minz && z < o.maxz && inPoly(x, z, o.pts)); // no made-up houses in parks, cemeteries, school yards
   for (const bi of ids) {
     const [lv, kind, flat] = D.buildings[bi]; const pts = []; let x = 0, z = 0;
@@ -993,7 +992,7 @@ function buildChunk(gx, gz) {
           const wAlong = real ? PROP_CFG[real].len : rand(7, 12), depth = real ? PROP_CFG[real].len * 0.8 : rand(8, 13), off = r.w / 2 + r.side + 0.8 + depth / 2;
           const cx = ax + ux * d - uz * off * s, cz = az + uz * d + ux * off * s;
           const ok = (() => { const okey = Math.round(cx / 6) + ',' + Math.round(cz / 6); if (occ.has(okey)) return false;
-            if (isWater(cx, cz) || roadOverlap(cx, cz) || inOpenLieu(cx, cz)) return false;
+            if (isWater(cx, cz) || roadOverlap(cx, cz) || inOpenLieu(cx, cz) || inSquare(cx, cz, squares)) return false;
             for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1]]) { const hx = a * wAlong / 2, hz = b * depth / 2; if (roadOverlap(cx + ux * hx - uz * hz, cz + uz * hx + ux * hz)) return false; }
             for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) occ.add((Math.round(cx / 6) + a) + ',' + (Math.round(cz / 6) + b)); return true; })();
           if (!ok) continue;
@@ -1008,7 +1007,7 @@ function buildChunk(gx, gz) {
           cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
           if (st.wall && Math.random() < st.wall * 0.6) walls.push([pts, st]);
           // street life: kiosks, coffee carts, fruit carts on the sidewalk
-          if (Math.random() < 0.1) { const pn = pick(['kiosque_om', 'kiosque_om', 'cafe', 'fruitcart']); if (PROPS[pn]) placeProp(group, pn, ax + ux * d - uz * (r.w / 2 + r.side * 0.6) * s, az + uz * d + ux * (r.w / 2 + r.side * 0.6) * s, faceRoad); }
+          if (Math.random() < 0.1) { const pn = pick(['kiosque_om', 'kiosque_om', 'cafe', 'fruitcart']); if (PROPS[pn]) kiosks.push([pn, ax + ux * d - uz * (r.w / 2 + r.side * 0.6) * s, az + uz * d + ux * (r.w / 2 + r.side * 0.6) * s, faceRoad, ri]); }
         }
       }
     }
@@ -1044,7 +1043,8 @@ function buildChunk(gx, gz) {
         if (A < 60) continue; groundPoly(group, o.pts, parkMat);
         for (let n = Math.min(70, A / 160); n > 0; n--) { const q = randIn(o); if (q && !roadOverlap(q[0], q[1], 1)) (Math.random() < 0.3 ? palms : neems).push(q); }
         parks.push(o);
-      } else if (o.kind === 'cimetiere') { // mur blanc, steles blanches et vertes
+      } else if (o.kind === 'place') squareContent(group, o, near, cols, neems, palms, benches);
+      else if (o.kind === 'cimetiere') { // mur blanc, steles blanches et vertes
         groundPoly(group, o.pts, cemeteryMat); enclosure(B, cols, o.pts, 1.9, 0xf1ece0, null, 0x1f1f22);
         for (let n = Math.min(320, polyArea(o.pts) / 10); n > 0; n--) { const q = randIn(o); if (q) stel.push([q[0], q[1], rand(-0.3, 0.3)]); }
       }
@@ -1101,6 +1101,7 @@ function buildChunk(gx, gz) {
     const cl = inst(G.cloth, clothMat, cloth, (o, [x, y, z, r]) => { o.position.set(x, y, z); o.rotation.set(0, r + Math.PI / 2, 0); o.scale.set(rand(0.7, 1.3), rand(0.7, 1.5), 1); }, false);
     if (cl) { const c = new THREE.Color(); cloth.forEach((_, i) => cl.setColorAt(i, c.set(pick(BOUBOU)))); }
   }
+  inst(G.bench, benchMat, benches, (o, [x, z, r]) => { o.position.set(x, 0, z); o.rotation.set(0, r, 0); o.scale.set(1, 1, 1); });
   inst(G.pole, poleMat, lamps, (o, [x, z, h]) => { o.position.set(x, 0, z); o.rotation.set(0, h, 0); o.scale.set(1, 1, 1); });
   inst(G.lamp, lampMat, lamps, (o, [x, z, h]) => { o.position.set(x, 0, z); o.rotation.set(0, h, 0); }, false);
   inst(G.glow, glowMat, lamps, (o, [x, z, h]) => { o.position.set(x + Math.sin(h) * 2.2, 0.35, z + Math.cos(h) * 2.2); o.rotation.set(-Math.PI / 2, 0, 0); }, false);
@@ -1151,6 +1152,11 @@ function buildChunk(gx, gz) {
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffffff })); ball.position.set(0, 0.22, 0); pg.add(ball); players.push(ball); ball.userData.ball = 1; ball.userData.ck = k; ball.userData.ph = Math.random() * 6;
     break;
   }
+  streetLights(byRoad, cols, lamps);
+  for (const [pn, x, z, h, ri] of kiosks) { const L = PROP_CFG[pn].len / 2 + 0.3;
+    if (isWater(x, z) || nearCarriageway(x, z, ri, 1.2) || inSquare(x, z, squares, true) || hitsCols(cols, x, z, L)) continue;
+    placeProp(group, pn, x, z, h); addCol(cols, x, z, L * 0.8); }
+  for (const [x, z] of benches) addCol(cols, x, z, 0.6);
   { // trees: never inside a building, on a lamp post or on top of each other; trunks are solid
     const placed = [], fit = (list, crown, gap) => list.filter(([x, z]) => {
       if (cols.some(c => x > c.minx - crown && x < c.maxx + crown && z > c.minz - crown && z < c.maxz + crown)) return false;
@@ -1174,7 +1180,8 @@ function buildChunk(gx, gz) {
           const sd = Math.random() < 0.5 ? 1 : -1, x = ax + (bx - ax) * d / L, z = az + (bz - az) * d / L;
           const atEnd = r.cum[i] + d < 14 || r.cum[i] + d > r.len - 14;
           if (r.t >= 4 && city && !atEnd && !r.y && Math.random() < 0.35) { const o = r.w / 2 + 0.25; const q = [x - cs * o * sd, z + sn * o * sd]; if (!cols.some(c => q[0] > c.minx - 1.2 && q[0] < c.maxx + 1.2 && q[1] > c.minz - 1.2 && q[1] < c.maxz + 1.2)) parked.push([q[0], q[1], h + (Math.random() < 0.5 ? 0 : Math.PI)]); }
-          else if (r.t <= 4 && city && Math.random() < 0.12) { const o = r.w / 2 + Math.max(1.5, r.side * 0.75); stalls.push([x - cs * o * sd, z + sn * o * sd, h]); }
+          else if (r.t <= 4 && city && !atEnd && Math.random() < 0.12) { const o = r.w / 2 + Math.max(1.5, r.side * 0.75), q = [x - cs * o * sd, z + sn * o * sd];
+            if (!nearCarriageway(q[0], q[1], ri, 2.5) && !hitsCols(cols, q[0], q[1], 1.3)) { stalls.push([q[0], q[1], h]); addCol(cols, q[0], q[1], 0.9); } }
           else if (Math.random() < 0.05) { const o = r.w / 2 + 0.8; piles.push([x - cs * o * sd, z + sn * o * sd]); }
         }
       }
@@ -1209,12 +1216,92 @@ function addLieu(o) {
   for (const [t, ...f] of L.verts) addLieu({ kind: 'vert', t, pts: unflat(f) });
   for (const [name, ...f] of L.ecoles) addLieu({ kind: 'ecole', name, pts: unflat(f) });
   for (const [rel, ...f] of L.cimetieres) addLieu({ kind: 'cimetiere', rel, pts: unflat(f) });
+  for (const [name, ...f] of L.places || []) addLieu({ kind: 'place', name, pts: unflat(f) });
   for (const [name, x, z, area, ...f] of L.mosquees) addLieu({ kind: 'mosquee', name, cx: x, cz: z, area, pts: f.length >= 6 ? unflat(f) : null });
   // the two great mosques OSM only has as points: real positions and sizes
   for (const [name, la, lo, model, w, d] of [['Grande Mosquée de Touba', 14.8611, -15.8757, 'mosquee_touba', 96, 84], ['Grande Mosquée de Dakar', 14.6744, -17.4447, 'mosquee_grande', 44, 48]]) {
     const [x, z] = ll(la, lo); addLieu({ kind: 'mosquee', name, cx: x, cz: z, area: w * d, model, size: [w, d], pts: null }); }
 }
 const lieuxNear = (gx, gz) => { const o = []; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) o.push(...(lieuGrid.get(ckey(gx + a, gz + b)) || [])); return o; };
+// distance from (x,z) to an outline, and the nearest point on it
+function polyNearest(x, z, pts) {
+  let bd = 1e9, bx = 0, bz = 0;
+  for (let i = 0; i < pts.length; i++) { const [ax, az] = pts[i], [cx, cz] = pts[(i + 1) % pts.length], dx = cx - ax, dz = cz - az, L2 = dx * dx + dz * dz || 1;
+    const t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1), qx = ax + dx * t, qz = az + dz * t, d = Math.hypot(x - qx, z - qz); if (d < bd) { bd = d; bx = qx; bz = qz; } }
+  return [bd, bx, bz];
+}
+// a point belongs to a public square when it is inside it, or when no carriageway separates it from the square (up to 30 m):
+// Place de l'Independance and the like are open ground from the garden to the streets around, never houses
+function inSquare(x, z, sq, inside = false) {
+  for (const o of sq) {
+    if (x < o.minx - 30 || x > o.maxx + 30 || z < o.minz - 30 || z > o.maxz + 30) continue;
+    if (inPoly(x, z, o.pts)) return o; if (inside) continue;
+    const [d, qx, qz] = polyNearest(x, z, o.pts); if (d > 30 || roadOverlap(x, z, -10)) continue;
+    let cut = false; for (let t = 2; t < d; t += 2) if (roadOverlap(x + (qx - x) * t / d, z + (qz - z) * t / d, -10)) { cut = true; break; }
+    if (!cut) return o;
+  }
+  return null;
+}
+// true when (x,z) is within `pad` metres of the carriageway of any road but `skip` (a crossing, a parallel road)
+function nearCarriageway(x, z, skip, pad) {
+  const gx = cellOf(x), gz = cellOf(z);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+    const s = segGrid.get(ckey(gx + a, gz + b)); if (!s) continue;
+    for (let j = 0; j < s.length; j += 2) {
+      if (s[j] === skip) continue; const r = roads[s[j]], i = s[j + 1]; if (r.t === 9) continue;
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1);
+      if (Math.hypot(x - ax - dx * t, z - az - dz * t) < r.w / 2 + pad) return true;
+    }
+  }
+  return false;
+}
+const hitsCols = (cols, x, z, m) => cols.some(c => x > c.minx - m && x < c.maxx + m && z > c.minz - m && z < c.maxz + m && (inPoly(x, z, c.pts) || polyNearest(x, z, c.pts)[0] < m));
+const addCol = (cols, x, z, r) => cols.push({ pts: [[x - r, z - r], [x + r, z - r], [x + r, z + r], [x - r, z + r]], minx: x - r, maxx: x + r, minz: z - r, maxz: z + r });
+// street lights on the main roads: one every 30 m (continuous from chunk to chunk), alternating sides on the wide ones,
+// never on another carriageway or a crossing, on a ramp, against a wall or on top of another post
+function streetLights(byRoad, cols, lamps) {
+  for (const [ri, list] of byRoad) {
+    const r = roads[ri]; if (r.t > 3) continue; const wide = r.w > 11 || r.t <= 1, base = (ri & 1) ? 1 : -1;
+    for (const i of list) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az); if (L < 1 || (r.y && Math.max(r.y[i], r.y[i + 1]) > 0.05)) continue;
+      const ux = (bx - ax) / L, uz = (bz - az) / L, h = Math.atan2(ux, uz), off = r.w / 2 + Math.max(0.6, r.side - 0.5);
+      for (let d = (30 - (r.cum[i] % 30)) % 30; d < L; d += 30) {
+        const s = wide && (Math.round((r.cum[i] + d) / 30) & 1) ? -base : base, x = ax + ux * d - uz * off * s, z = az + uz * d + ux * off * s;
+        if (isWater(x, z) || nearCarriageway(x, z, ri, 4) || hitsCols(cols, x, z, 0.5) || lamps.some(([lx, lz]) => Math.hypot(lx - x, lz - z) < 12)) continue;
+        lamps.push([x, z, h + (s > 0 ? Math.PI / 2 : -Math.PI / 2)]); addCol(cols, x, z, 0.2);
+      }
+    }
+  }
+}
+// public square: paved from its garden to the streets around, benches facing the garden, shade trees (neems) and a few palms
+const plazaMat = new THREE.MeshStandardMaterial({ color: 0xd8d0c2, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -0.8, polygonOffsetUnits: -0.8 });
+pbr(plazaMat, 'interlocking_concrete_pavers', { tint: new THREE.Color(2.3, 2.2, 2.05) });
+const benchMat = new THREE.MeshStandardMaterial({ color: 0xcfc6b4, roughness: 0.85 });
+function squareContent(group, o, near, cols, neems, palms, benches) {
+  const gardens = near.filter(v => v.kind === 'vert' && v.t === 0 && v.pts && v.maxx > o.minx && v.minx < o.maxx && v.maxz > o.minz && v.minz < o.maxz);
+  const inGarden = (x, z) => gardens.some(v => x > v.minx && x < v.maxx && z > v.minz && z < v.maxz && inPoly(x, z, v.pts));
+  const pos = [], uv = [], S = 3, sq = [o];
+  for (let x = o.minx - 30; x < o.maxx + 30; x += S) for (let z = o.minz - 30; z < o.maxz + 30; z += S) {
+    const cx = x + S / 2, cz = z + S / 2; if (inGarden(cx, cz) || isWater(cx, cz) || roadOverlap(cx, cz, -10) || !inSquare(cx, cz, sq)) continue;
+    for (const [a, b] of [[x, z], [x, z + S], [x + S, z], [x + S, z], [x, z + S], [x + S, z + S]]) { pos.push(a, 0.06, b); uv.push(a / 3, b / 3); }
+    const r = Math.random(); if (r < 0.045) neems.push([cx + rand(-1, 1), cz + rand(-1, 1)]); else if (r < 0.055) palms.push([cx, cz]);
+  }
+  if (pos.length) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals(); const m = new THREE.Mesh(g, plazaMat); m.receiveShadow = true; group.add(m); }
+  // benches every ~8 m along the garden edge (outside, facing it) or, on a plain plaza, along its edge facing inward
+  for (const v of gardens.length ? gardens : [o]) {
+    const out = v !== o ? 1 : -1;
+    for (let i = 0; i < v.pts.length; i++) {
+      const [ax, az] = v.pts[i], [bx, bz] = v.pts[(i + 1) % v.pts.length], L = Math.hypot(bx - ax, bz - az); if (L < 6) continue;
+      const ux = (bx - ax) / L, uz = (bz - az) / L; let nx = -uz, nz = ux; const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+      if (inPoly(mx + nx, mz + nz, v.pts)) { nx = -nx; nz = -nz; } // n points out of the outline
+      for (let d = 4; d < L - 3; d += 8) {
+        const x = ax + ux * d + nx * 1.4 * out, z = az + uz * d + nz * 1.4 * out;
+        if (roadOverlap(x, z, -10) || hitsCols(cols, x, z, 1) || (v === o ? false : !inSquare(x, z, sq))) continue;
+        benches.push([x, z, Math.atan2(nx, nz)]); // bench front is -z: the sitter looks toward the garden, or into the plaza
+      }
+    }
+  }
+}
 // oriented bounding box of a footprint: the edge direction that gives the smallest box
 function obb(pts) {
   let best = null;
@@ -1300,7 +1387,10 @@ const G = (() => {
   const dish = mergeGeometries([new THREE.CylinderGeometry(0.03, 0.03, 0.9, 5).translate(0, 0.45, 0), new THREE.SphereGeometry(0.42, 10, 5, 0, Math.PI * 2, 0, 0.9).rotateX(-1.2).translate(0, 0.95, 0.12)]);
   const cloth = new THREE.PlaneGeometry(0.55, 0.75).translate(0, -0.38, 0);
   const stele = new THREE.BoxGeometry(0.35, 0.55, 0.07).translate(0, 0.27, 0);
-  return { tank, dish, cloth, pole, upole, grass, bush, goal, player, lamp, glow, trunk, crown, neemT, neem, carBody, carTop, stall, parasol, pile, stele };
+  // banc de place publique : assise et dossier en beton sur deux pieds, la face assise vers -z
+  const bench = mergeGeometries([new THREE.BoxGeometry(1.9, 0.08, 0.48).translate(0, 0.45, 0), new THREE.BoxGeometry(1.9, 0.38, 0.07).translate(0, 0.72, 0.22),
+    ...[-0.75, 0.75].map(k => new THREE.BoxGeometry(0.12, 0.43, 0.42).translate(k, 0.21, 0))]);
+  return { bench, tank, dish, cloth, pole, upole, grass, bush, goal, player, lamp, glow, trunk, crown, neemT, neem, carBody, carTop, stall, parasol, pile, stele };
 })();
 function addMinaret(group, x, z, h, area) {
   const white = new THREE.MeshStandardMaterial({ color: 0xf2ece0, roughness: 0.7 }), green = new THREE.MeshStandardMaterial({ color: 0x2f8f5a, roughness: 0.4, metalness: 0.2 });
@@ -1468,14 +1558,17 @@ function makeCar(name, color) {
   g.userData.cfg = CAR_CFG[name] || CAR_CFG.peugeot405; g.userData.model = name; scene.add(g); return g;
 }
 function placeProp(group, name, x, z, h) { const m = PROPS[name].clone(); m.position.set(x, 0, z); m.rotation.y = h; group.add(m); }
-let soldier = null;
+// gens de Dakar, chat et oiseaux modelises dans Blender (tools/gens_blender.py)
+const GENS_TYPES = { boubou: 3, kaftan: 3, jeune: 3, costume: 1.5, drianke: 3, vendeuse: 2, jeunefemme: 3, bayefall: 0.7, ecolier: 1.5 }, GENS = {}; let catGLB = null, birdGLB = null;
 async function loadAll(progress) {
-  const names = Object.keys(CAR_CFG), props = Object.keys(PROP_CFG); let done = 0; const total = names.length + props.length + 1;
+  const names = Object.keys(CAR_CFG), props = Object.keys(PROP_CFG); let done = 0; const total = names.length + props.length + Object.keys(GENS_TYPES).length + 1;
   const tick = () => progress(++done / total);
   await Promise.all([
     ...names.map(n => loader.loadAsync(`models/${n}.glb`).then(g => { MODELS[n] = normalize(g.scene, CAR_CFG[n]); }).catch(e => console.warn('model', n, e)).finally(tick)),
     ...props.map(n => loader.loadAsync(`models/${n}.glb`).then(g => { PROPS[n] = normalize(g.scene, PROP_CFG[n]); }).catch(e => console.warn('prop', n, e)).finally(tick)),
-    loader.loadAsync('models/Soldier.glb').then(g => { soldier = g; }).catch(e => console.warn(e)).finally(tick),
+    ...Object.keys(GENS_TYPES).map(n => loader.loadAsync(`models/gens_${n}.glb`).then(g => { GENS[n] = g; }).catch(e => console.warn('gens', n, e)).finally(tick)),
+    loader.loadAsync('models/chat.glb').then(g => { catGLB = g; }).catch(e => console.warn(e)).finally(tick),
+    loader.loadAsync('models/oiseau.glb').then(g => { birdGLB = g; }).catch(e => console.warn(e)),
     ...Object.keys(HOUSE_GEO).map(n => loader.loadAsync(`models/${n}.glb`).then(g => { HOUSE_GEO[n] = houseGeometry(g.scene); }).catch(e => console.warn('maison', n, e))),
   ]);
 }
@@ -1536,7 +1629,7 @@ function spawnAt(x, z) {
   camPos.set(x - Math.sin(player.h) * 10, 5, z - Math.cos(player.h) * 10);
   updateChunks(x, z); processQueue(30);
   for (const c of traffic) removeCar(c); traffic.length = 0;
-  for (const p of peds) p.g.visible = false;
+  for (const p of peds) p.g.visible = false; for (const a of [...cats, ...birds]) a.g.visible = false;
 }
 
 // ---------------- Input ----------------
@@ -1664,26 +1757,129 @@ function updateTraffic(dt) {
 }
 
 // ---------------- Pedestrians ----------------
+// Senegalese passers-by: grand boubou, kaftan, taille-basse and musoor, vendeuse with her basin, Baye Fall, schoolboy, suit...
+// Cloth colours are drawn per person; prints are wax patterns painted on a canvas, the grands boubous plain shiny bazin.
 const peds = []; const BOUBOU = [0x2a7fd4, 0xf2b01e, 0x2f9e54, 0xd8432f, 0x9b4fc4, 0xffffff, 0x18a39a, 0xf07f2f];
+const SKIN = [0x2e1a12, 0x3b2219, 0x4a2c1d, 0x5a3825, 0x6b4430, 0x7a5038];
+const BAZIN = [0xf4f1ea, 0x1f4fa0, 0x5b2a86, 0x0f6b4a, 0xd9b44a, 0x8a1c2b, 0x9ec7e6, 0xe7b8c8, 0x2b2b2b, 0xc96a1b];
+const WAX_PAL = [['#f2b01e', '#1f4fa0', '#d8432f', '#ffffff'], ['#0f6b4a', '#f2c200', '#e85d1a', '#1a1a1a'], ['#9b2f86', '#f6a5c0', '#2a7fd4', '#fff4d6'], ['#c0392b', '#f4d03f', '#1b2631', '#27ae60'],
+  ['#1b4f72', '#5dade2', '#f39c12', '#fdfefe'], ['#7b241c', '#e59866', '#1d8348', '#f9e79f'], ['#2e86c1', '#f5b041', '#145a32', '#ffffff'], ['#e74c3c', '#1a5276', '#f7dc6f', '#17202a']];
+function waxTex([a, b, c, d]) { // one wax print: background, rows of motifs (circles, lozenges, leaves or stripes)
+  const m = Math.floor(Math.random() * 4);
+  return canvasTex(128, 128, (g) => {
+    g.fillStyle = a; g.fillRect(0, 0, 128, 128);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { const cx = x * 32 + (y & 1) * 16 + 8, cy = y * 32 + 16;
+      if (m === 0) { g.fillStyle = b; g.beginPath(); g.arc(cx, cy, 12, 0, 7); g.fill(); g.fillStyle = c; g.beginPath(); g.arc(cx, cy, 7, 0, 7); g.fill(); g.fillStyle = d; g.beginPath(); g.arc(cx, cy, 3, 0, 7); g.fill(); }
+      else if (m === 1) { g.fillStyle = b; g.beginPath(); g.moveTo(cx, cy - 14); g.lineTo(cx + 10, cy); g.lineTo(cx, cy + 14); g.lineTo(cx - 10, cy); g.fill(); g.fillStyle = c; g.fillRect(cx - 3, cy - 3, 6, 6); }
+      else if (m === 2) { g.fillStyle = b; g.beginPath(); g.ellipse(cx, cy, 13, 5, (x + y) * 0.8, 0, 7); g.fill(); g.strokeStyle = d; g.lineWidth = 1.5; g.beginPath(); g.moveTo(cx - 11, cy); g.lineTo(cx + 11, cy); g.stroke(); g.fillStyle = c; g.beginPath(); g.arc(cx + 14, cy + 10, 3, 0, 7); g.fill(); }
+      else { g.fillStyle = b; g.fillRect(x * 32, 0, 10, 128); g.fillStyle = c; g.fillRect(x * 32 + 14, 0, 4, 128); g.fillStyle = d; g.beginPath(); g.arc(x * 32 + 25, cy, 4, 0, 7); g.fill(); }
+    }
+  });
+}
+const WAX = WAX_PAL.map(waxTex);
+const patchTex = canvasTex(128, 128, (g) => { // ndiakhass des Baye Fall : morceaux de tissus cousus
+  for (let y = 0; y < 128; y += 16) for (let x = 0; x < 128;) { const w = 12 + Math.floor(Math.random() * 28); g.fillStyle = pick(['#3b2a1a', '#7a4a22', '#a0522d', '#1a1a1a', '#6b8e23', '#8b1a1a', '#c8a050', '#2f4f4f', '#d2b48c']); g.fillRect(x, y, w, 16); g.strokeStyle = 'rgba(0,0,0,.4)'; g.strokeRect(x, y, w, 16); x += w; } });
+function dressGens(g, type) { // per-person colours: skin, main cloth (wax print or bazin), second cloth, basin
+  const wax = type !== 'boubou' && Math.random() < 0.7, main = new THREE.Color(pick(BAZIN)), second = Math.random() < 0.5 ? main.clone() : new THREE.Color(pick(BAZIN)), tex = pick(WAX), skin = pick(SKIN);
+  g.traverse(o => { if (!o.isMesh) return; o.castShadow = true; o.frustumCulled = false; const n = o.material.name; o.material = o.material.clone(); const m = o.material;
+    if (n === 'Peau') m.color.set(skin);
+    else if (n === 'Tissu') { if (wax) { m.map = tex; m.color.set(0xffffff); } else { m.color.copy(main); m.roughness = 0.35; m.metalness = 0.15; } } // bazin riche : brillant
+    else if (n === 'Tissu2') m.color.copy(type === 'boubou' ? (Math.random() < 0.5 ? main : new THREE.Color(0xf4f1ea)) : second);
+    else if (n === 'Patch') { m.map = patchTex; m.color.set(0xffffff); }
+    else if (n === 'Bassine') m.color.set(pick([0x2a7fd4, 0xd8432f, 0x2f9e54, 0xf2b01e, 0xf4f1ea]));
+    else if (n === 'Costume') m.color.set(pick([0x23262c, 0x2b3a55, 0x3a3a3a, 0x5a4a3a]));
+  });
+}
 function initPeds() {
-  if (!soldier) return;
-  const clipW = soldier.animations.find(a => a.name === 'Walk'), clipR = soldier.animations.find(a => a.name === 'Run'), clipI = soldier.animations.find(a => a.name === 'Idle');
+  const types = Object.keys(GENS_TYPES).filter(n => GENS[n]); if (!types.length) return;
+  const tot = types.reduce((a, n) => a + GENS_TYPES[n], 0);
   for (let i = 0; i < 34; i++) {
     if (i >= Q.peds) break;
-    const g = SkeletonUtils.clone(soldier.scene); const col = pick(BOUBOU);
-    g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; o.material = o.material.clone(); o.material.color.set(col).lerp(new THREE.Color(1, 1, 1), 0.25); } });
+    let r = Math.random() * tot, type = types[0]; for (const n of types) { r -= GENS_TYPES[n]; if (r < 0) { type = n; break; } }
+    const src = GENS[type], g = SkeletonUtils.clone(src.scene); dressGens(g, type);
+    const clipW = src.animations.find(a => a.name === 'Walk'), clipI = src.animations.find(a => a.name === 'Idle');
     const mixer = new THREE.AnimationMixer(g);
-    const aw = mixer.clipAction(clipW), ar = mixer.clipAction(clipR), ai = mixer.clipAction(clipI);
+    const aw = mixer.clipAction(clipW), ar = mixer.clipAction(clipW.clone()), ai = mixer.clipAction(clipI); ar.timeScale = 2.3;
     aw.play(); g.visible = false; scene.add(g);
-    peds.push({ g, mixer, aw, ar, ai, x: 0, z: 0, alive: true, state: 'walk', r: null, s: 0, dir: 1, side: 1, cross: 0, vy: 0, t: 0 });
+    peds.push({ g, type, mixer, aw, ar, ai, x: 0, z: 0, alive: true, state: 'walk', r: null, s: 0, dir: 1, side: 1, cross: 0, vy: 0, t: 0 });
   }
+  initAnimals();
 }
 function spawnPed(p) {
   for (let tries = 0; tries < 5; tries++) {
     const ang = Math.random() * Math.PI * 2, dist = rand(25, 150), x = player.x + Math.sin(ang) * dist, z = player.z + Math.cos(ang) * dist;
     const nr = nearestRoad(x, z, 1, r => r.t >= 2 && r.t <= 7); if (!nr || nr.d > 40) continue;
-    Object.assign(p, { r: nr.r, s: nr.r.cum[nr.i] + nr.t * (nr.r.cum[nr.i + 1] - nr.r.cum[nr.i]), dir: Math.random() < .5 ? 1 : -1, side: Math.random() < .5 ? 1 : -1, alive: true, state: 'walk', cross: 0, speed: rand(1.1, 1.6), wait: rand(10, 40) });
+    Object.assign(p, { r: nr.r, s: nr.r.cum[nr.i] + nr.t * (nr.r.cum[nr.i + 1] - nr.r.cum[nr.i]), dir: Math.random() < .5 ? 1 : -1, side: Math.random() < .5 ? 1 : -1, alive: true, state: 'walk', cross: 0,
+      speed: rand(1.0, 1.5) * (p.type === 'vendeuse' || p.type === 'boubou' ? 0.85 : 1), wait: rand(10, 40), lane: rand(0.4, 1.6) });
     p.g.visible = true; p.g.rotation.set(0, 0, 0); p.aw.reset().play(); p.ar.stop(); p.ai.stop(); return;
+  }
+}
+
+// ---------------- Chats et oiseaux ----------------
+// street cats along the walls, pigeons pecking on the sidewalks (they fly off when a car comes close),
+// pied crows and black kites circling over the roofs
+const cats = [], birds = [], flocks = [null, null, null];
+const CAT_FUR = [0xc8783a, 0xd9a066, 0x8a8a88, 0x2a2622, 0xf2ece0, 0x6b5a48];
+function animalClone(src, recolour) {
+  const g = SkeletonUtils.clone(src.scene); g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; o.material = o.material.clone(); recolour(o.material); } });
+  const mixer = new THREE.AnimationMixer(g), act = n => mixer.clipAction(src.animations.find(a => a.name === n)); g.visible = false; scene.add(g); return { g, mixer, act };
+}
+function initAnimals() {
+  if (catGLB) for (let i = 0; i < Math.ceil(Q.peds / 5); i++) { const fur = pick(CAT_FUR), a = animalClone(catGLB, m => { if (m.name === 'Pelage') m.color.set(fur); });
+    cats.push({ ...a, walk: a.act('Walk'), idle: a.act('Idle'), state: 'idle' }); }
+  if (birdGLB) for (let i = 0; i < Math.ceil(Q.peds * 0.9); i++) {
+    const kind = i % 3 === 2 ? 'sky' : 'ground', sp = kind === 'ground' ? 'pigeon' : pick(['corbeau', 'corbeau', 'milan']);
+    const [pl, col] = { pigeon: [pick([0x8a8f99, 0x7b7f86, 0x9a9488]), 0x5f7a72], corbeau: [0x141414, 0xf0f0ee], milan: [0x4a3828, 0x5e4934] }[sp];
+    const a = animalClone(birdGLB, m => { if (m.name === 'Plumage') m.color.set(pl); else if (m.name === 'Col') m.color.set(col); });
+    a.g.scale.setScalar(sp === 'pigeon' ? 0.75 : sp === 'milan' ? 1.9 : 1.05);
+    birds.push({ ...a, fly: a.act('Fly'), peck: a.act('Peck'), kind, sp, flock: i % 3, state: 'off' });
+  }
+}
+const sidewalkSpot = (dmin, dmax) => { // a random point on a sidewalk near the player: [road, s, side, off]
+  const ang = Math.random() * Math.PI * 2, dist = rand(dmin, dmax), nr = nearestRoad(player.x + Math.sin(ang) * dist, player.z + Math.cos(ang) * dist, 1, r => r.t >= 2 && r.t <= 8);
+  return nr && nr.d < 40 ? { r: nr.r, s: nr.r.cum[nr.i] + nr.t * (nr.r.cum[nr.i + 1] - nr.r.cum[nr.i]), side: Math.random() < 0.5 ? 1 : -1 } : null;
+};
+const onWalk = (q, off) => { const [x, z, h] = roadPoint(q.r, clamp(q.s, 0, q.r.len)); return [x - Math.cos(h) * off * q.side, z + Math.sin(h) * off * q.side, h]; };
+function updateAnimals(dt) {
+  const pv = Math.hypot(player.vx, player.vz);
+  for (const c of cats) {
+    if (!c.g.visible) { if (Math.random() < dt * 0.3) { const q = sidewalkSpot(15, 90); if (q) { Object.assign(c, q, { off: q.r.w / 2 + Math.max(0.6, q.r.side) + rand(0.2, 1.1), dir: Math.random() < 0.5 ? 1 : -1, state: 'idle', t: rand(2, 8) }); c.g.visible = true; c.idle.reset().play(); c.walk.stop(); } } continue; }
+    const d = Math.hypot(c.x - player.x, c.z - player.z); if (d > 130) { c.g.visible = false; continue; }
+    if (d < 10 && pv > 3 && c.state !== 'flee') { c.state = 'flee'; c.t = 2.5; c.walk.reset().play(); c.walk.timeScale = 3.5; c.idle.stop(); }
+    c.t -= dt;
+    if (c.state === 'walk') { c.s += c.dir * 0.55 * dt; if (c.t < 0) { c.state = 'idle'; c.t = rand(3, 12); c.idle.reset().play(); c.walk.stop(); } }
+    else if (c.state === 'idle') { if (c.t < 0) { c.state = 'walk'; c.t = rand(3, 9); c.dir = Math.random() < 0.5 ? 1 : -1; c.walk.reset().play(); c.walk.timeScale = 1; c.idle.stop(); } }
+    else { c.s += c.dir * 4 * dt; if (c.t < 0) c.g.visible = false; } // file sous une voiture ou dans une cour
+    if (c.s < 0 || c.s > c.r.len) { c.dir = -c.dir; c.s = clamp(c.s, 0, c.r.len); }
+    const [x, z, h] = onWalk(c, c.off); c.x = x; c.z = z; c.g.position.set(x, 0.1, z); c.g.rotation.y = c.dir > 0 ? h : h + Math.PI;
+    if (d < 60) c.mixer.update(dt);
+  }
+  for (const b of birds) {
+    if (!b.g.visible) {
+      if (Math.random() > dt * 0.5) continue;
+      if (b.kind === 'ground') {
+        let f = flocks[b.flock]; if (!f || Math.hypot(f.x - player.x, f.z - player.z) > 140) { const q = sidewalkSpot(30, 100); if (!q) continue; const [x, z] = onWalk(q, q.r.w / 2 + Math.max(0.8, q.r.side * 0.6)); f = flocks[b.flock] = { x, z }; }
+        b.x = f.x + rand(-2.5, 2.5); b.z = f.z + rand(-2.5, 2.5); b.y = 0.1; b.state = 'peck'; b.g.rotation.set(0, rand(0, 6.3), 0);
+        b.peck.reset().play(); b.peck.time = rand(0, 2); b.fly.stop();
+      } else {
+        b.cx = player.x + rand(-120, 120); b.cz = player.z + rand(-120, 120); b.R = rand(15, 40); b.a = rand(0, 6.3); b.x = b.cx; b.z = b.cz; b.y = rand(18, 45); b.w = (b.sp === 'milan' ? 6 : 9) / b.R * (Math.random() < 0.5 ? 1 : -1);
+        b.state = 'sky'; b.fly.reset().play(); b.fly.timeScale = b.sp === 'milan' ? 0.35 : 0.9; b.peck.stop();
+      }
+      b.f = b.flock; b.t = 0; b.g.visible = true;
+    }
+    const d = Math.hypot(b.x - player.x, b.z - player.z); if (d > 200) { b.g.visible = false; continue; }
+    b.t += dt;
+    if (b.state === 'peck') {
+      if (d < 16 && pv > 1.5) { // tout le groupe s'envole
+        const ax = b.x - player.x, az = b.z - player.z, k = 1 / (Math.hypot(ax, az) || 1); b.vx = ax * k * rand(5, 8); b.vz = az * k * rand(5, 8); b.vy = rand(2.5, 4);
+        b.state = 'up'; b.t = 0; b.fly.reset().play(); b.fly.timeScale = 1.6; b.peck.stop(); if (flocks[b.flock] && Math.hypot(flocks[b.flock].x - b.x, flocks[b.flock].z - b.z) < 6) flocks[b.flock] = null;
+      } else if (Math.random() < dt * 0.3) b.g.rotation.y += rand(-1.2, 1.2); // se retourne en picorant
+    } else if (b.state === 'up') {
+      b.x += b.vx * dt; b.z += b.vz * dt; b.y += b.vy * dt; b.vy = Math.max(0.6, b.vy - 0.4 * dt); b.g.rotation.y = Math.atan2(b.vx, b.vz); b.g.rotation.z = Math.sin(b.t * 3) * 0.15;
+      if (b.t > 7) b.g.visible = false;
+    } else { b.a += b.w * dt; b.x = b.cx + Math.cos(b.a) * b.R; b.z = b.cz + Math.sin(b.a) * b.R; b.g.rotation.y = Math.atan2(-Math.sin(b.a) * b.w, Math.cos(b.a) * b.w); b.g.rotation.z = -Math.sign(b.w) * 0.35; }
+    b.g.position.set(b.x, b.y + (b.state === 'sky' ? Math.sin(b.t * 0.7) * 1.5 : 0), b.z);
+    if (d < 120) b.mixer.update(dt);
   }
 }
 function updatePeds(dt) {
@@ -1693,13 +1889,14 @@ function updatePeds(dt) {
     if (d > 190) { p.g.visible = false; continue; }
     if (!p.alive) { p.vy -= 22 * dt; p.y = Math.max(0, p.y + p.vy * dt); p.x += p.vx * dt; p.z += p.vz * dt; p.vx *= 0.98; p.vz *= 0.98; p.g.rotation.x = Math.min(Math.PI / 2, p.g.rotation.x + dt * 5); p.g.position.set(p.x, p.y, p.z); p.dead += dt; if (p.dead > 25) p.g.visible = false; continue; }
     const r = p.r; const [x, z, h] = roadPoint(r, clamp(p.s, 0, r.len)); const hd = p.dir > 0 ? h : h + Math.PI;
-    const off = (r.w / 2 + Math.max(1, r.side * 0.6)) * p.side * (p.state === 'cross' ? 1 - 2 * p.cross : 1);
+    const off = (r.w / 2 + Math.max(0.8, Math.min(r.side - 0.3, p.lane))) * p.side * (p.state === 'cross' ? 1 - 2 * p.cross : 1);
     // flee from fast player car
     const pv = Math.hypot(player.vx, player.vz);
-    if (d < 14 && pv > 8 && p.state !== 'flee') { p.state = 'flee'; p.ar.reset().play(); p.aw.stop(); p.fleeT = 2; }
+    if (d < 14 && pv > 8 && p.state !== 'flee' && p.state !== 'cross') { p.state = 'flee'; p.ar.reset().play(); p.aw.stop(); p.ai.stop(); p.fleeT = 2; }
     if (p.state === 'walk') {
       p.s += p.dir * p.speed * dt; p.wait -= dt;
       if (p.s < 0 || p.s > r.len) p.dir = -p.dir;
+      if (Math.random() < dt * 0.04) { p.state = 'stop'; p.stopT = rand(2, 8); p.ai.reset().play(); p.aw.stop(); } // s'arrete : salue quelqu'un, regarde un etal
       if (p.wait < 0) { // try crossing
         let ok = r.t >= 5; const gx = cellOf(x), gz = cellOf(z);
         for (const si of sigGrid.get(ckey(gx, gz)) || []) { const s = signals[si]; if (Math.hypot(s.x - x, s.z - z) < 30) ok = signalState(s, h) === 'r'; }
@@ -1708,14 +1905,16 @@ function updatePeds(dt) {
     } else if (p.state === 'cross') {
       p.cross += dt * (p.speed * 1.2) / (r.w + 2.4);
       if (p.cross >= 1) { p.side = -p.side; p.state = 'walk'; p.cross = 0; p.wait = rand(15, 45); }
+    } else if (p.state === 'stop') {
+      p.stopT -= dt; if (p.stopT < 0) { p.state = 'walk'; p.aw.reset().play(); p.ai.stop(); }
     } else if (p.state === 'flee') {
       p.fleeT -= dt; p.side = Math.sign(p.side) * 1; p.s += p.dir * 4 * dt;
       if (p.fleeT < 0) { p.state = 'walk'; p.aw.reset().play(); p.ar.stop(); }
     }
     p.x = x - Math.cos(h) * off; p.z = z + Math.sin(h) * off;
-    p.g.position.set(p.x, 0, p.z);
-    p.g.rotation.y = p.state === 'cross' ? (h + (p.side > 0 ? -Math.PI / 2 : Math.PI / 2)) + Math.PI : hd + Math.PI;
-    if (d < (qIdx ? 90 : 50)) p.mixer.update(dt * (p.state === 'flee' ? 1 : p.speed / 1.3));
+    p.g.position.set(p.x, 0.1, p.z); // on the sidewalk
+    p.g.rotation.y = p.state === 'cross' ? h + (p.side > 0 ? Math.PI / 2 : -Math.PI / 2) : hd; // models face +z
+    if (d < (qIdx ? 90 : 50)) p.mixer.update(dt * (p.state === 'flee' || p.state === 'stop' ? 1 : p.speed / 1.3));
     // hit by player
     if (d < 2.2 && pv > 3) {
       p.alive = false; p.dead = 0; p.y = 0; p.vy = 4 + pv * 0.15; p.vx = player.vx * 0.6; p.vz = player.vz * 0.6; p.mixer.stopAllAction();
@@ -1903,7 +2102,9 @@ function updatePlayer(dt) {
 
 // ---------------- Camera ----------------
 const camPos = new THREE.Vector3(); let shake = 0;
+let skyCam = null; // debug from the console: DOW.vue(height, distance back) looks down on the player's spot, DOW.vue() to come back
 function updateCamera(dt, vf) {
+  if (skyCam) { const [hh, bb] = skyCam, fx = Math.sin(player.h), fz = Math.cos(player.h); camera.position.set(player.x - fx * bb, hh, player.z - fz * bb); camera.lookAt(player.x, 0, player.z); sun.position.set(player.x + sunDir.x * 300, Math.max(30, sunDir.y * 300), player.z + sunDir.z * 300); sun.target.position.set(player.x, 0, player.z); return; }
   const sp = Math.abs(vf), len = player.cfg.len;
   const back = [len * 1.6 + 3, len * 2.5 + 5, -0.4][camMode], height = [2.4 + len * 0.25, 5 + len * 0.4, 1.25][camMode];
   const fx = Math.sin(player.h), fz = Math.cos(player.h);
@@ -2094,7 +2295,7 @@ function loop() {
   const vf = updatePlayer(dt);
   chunkT -= dt; if (chunkT < 0) { chunkT = 0.5; updateChunks(player.x, player.z); }
   processQueue(1);
-  updateSmoke(dt); updateNitroFx(); updateStory(dt); updateClock(dt); updateGares(); updateRadio(dt); updateDiscover(dt); updateRoute(dt); spawnTraffic(); updateTraffic(dt); updatePeds(dt); updateCops(dt);
+  updateSmoke(dt); updateNitroFx(); updateStory(dt); updateClock(dt); updateGares(); updateRadio(dt); updateDiscover(dt); updateRoute(dt); spawnTraffic(); updateTraffic(dt); updatePeds(dt); updateAnimals(dt); updateCops(dt);
   updateTrafficLightVisuals(); updateCamera(dt, vf); updateGoogle3D(dt); updateHackUI(dt);
   drawMinimap(dt, vf); updateHUD(dt, vf); updateAudio(dt, vf);
   if (waterMat) waterMat.normalMap.offset.set(time * 0.01, time * 0.006);
@@ -2390,7 +2591,7 @@ function skipTravel() { // fast-forward a long regional trip
   if (lieu.length === 2 && lieu.every(Number.isFinite)) spawnAt(...ll(lieu[0], lieu[1]));
   else spawnAt(CITIES[1].p[0], CITIES[1].p[1]);
   if (url.has('cap')) player.h = THREE.MathUtils.degToRad(+url.get('cap'));
-  window.DOW = { player, spawnAt, ll, MODELS, PROPS, scene, camera, keys, get chunks() { return chunks; } };
+  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, keys, get chunks() { return chunks; } };
   $('loadtxt').textContent = 'Prêt. Bienvenue à Dakar.';
   const btn = $('start'); btn.style.display = 'block';
   const go = () => { $('loading').style.display = 'none'; initAudio(); chapterCard(); };

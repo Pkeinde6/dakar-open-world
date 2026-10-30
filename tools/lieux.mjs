@@ -3,6 +3,7 @@
 //   ecoles:     [name, flat...]
 //   mosquees:   [name, x, z, area, flat...]  (flat empty for node-only mosques)
 //   cimetieres: [religion, flat...]
+//   places:     [name, flat...]  squares and pedestrian areas (Place de l'Independance...): benches and trees, no houses
 // usage: node tools/lieux.mjs [cache-dir]
 import fs from 'fs';
 const src = fs.readFileSync(new URL('../data.js', import.meta.url), 'utf8');
@@ -28,9 +29,15 @@ async function overpass(file, q) {
   throw new Error('overpass');
 }
 const els = await overpass('lieux.json', Q);
+const sq = await overpass('places.json', `[out:json][timeout:120];(
+way["place"="square"](${BBOX});
+way["highway"="pedestrian"]["area"="yes"](${BBOX});
+way["area:highway"="pedestrian"](${BBOX});
+relation["place"="square"](${BBOX});
+);out tags geom;`);
 const flat = g => { const p = g.map(n => px(n.lat, n.lon)); if (p.length > 2 && p[0][0] === p.at(-1)[0] && p[0][1] === p.at(-1)[1]) p.pop(); const o = []; let a = 0, b = 0; for (const [x, z] of p) { o.push(x - a, z - b); a = x; b = z; } return o; };
 const area = g => { const p = g.map(n => px(n.lat, n.lon)); let s = 0; for (let i = 0; i < p.length; i++) { const [x1, z1] = p[i], [x2, z2] = p[(i + 1) % p.length]; s += x1 * z2 - x2 * z1; } return Math.abs(s / 2); };
-const out = { verts: [], ecoles: [], mosquees: [], cimetieres: [] }, seen = new Set();
+const out = { verts: [], ecoles: [], mosquees: [], cimetieres: [], places: [] }, seen = new Set();
 for (const e of els) {
   if (seen.has(e.type + e.id)) continue; seen.add(e.type + e.id); const t = e.tags || {};
   const muslim = (t.amenity === 'place_of_worship' && (t.religion === 'muslim' || /mosqu|jumm|djami/i.test(t.name || ''))) || t.building === 'mosque';
@@ -42,10 +49,14 @@ for (const e of els) {
   if (!e.geometry || e.geometry.length < 4) continue;
   if (/^(school|college|university|kindergarten)$/.test(t.amenity)) out.ecoles.push([t.name || '', ...flat(e.geometry)]);
   else if (t.landuse === 'cemetery' || t.amenity === 'grave_yard') out.cimetieres.push([t.religion === 'christian' ? 1 : 0, ...flat(e.geometry)]);
-  else if (t.leisure === 'park' || t.leisure === 'garden') out.verts.push([0, ...flat(e.geometry)]);
+  else if (t.leisure === 'park' || t.leisure === 'garden') { out.verts.push([0, ...flat(e.geometry)]); if (/^(place|esplanade|square|parvis)\b/i.test(t.name || '')) out.places.push([t.name, ...flat(e.geometry)]); }
   else if (t.leisure === 'pitch') out.verts.push([1, ...flat(e.geometry)]);
   else if (t.leisure === 'playground') out.verts.push([3, ...flat(e.geometry)]);
   else out.verts.push([2, ...flat(e.geometry)]);
+}
+for (const e of sq) { // relations: their outer ways
+  const t = e.tags || {}, ways = e.type === 'relation' ? (e.members || []).filter(m => m.role !== 'inner' && m.geometry).map(m => m.geometry) : [e.geometry];
+  for (const g of ways) if (g && g.length >= 4 && area(g) > 150) out.places.push([t.name || '', ...flat(g)]);
 }
 fs.writeFileSync(new URL('../lieux.js', import.meta.url), `window.LIEUX=${JSON.stringify(out)};`);
 console.log(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.length])), 'mosquees nommees:', out.mosquees.filter(m => m[0]).length);
