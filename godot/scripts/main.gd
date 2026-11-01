@@ -24,6 +24,10 @@ var trafic
 var water: StandardMaterial3D
 var lamp_glow: StandardMaterial3D
 var clock := 0.0
+var sun: DirectionalLight3D
+var level := 2 # qualite auto : 0 tres bas ... 3 haut
+var fps_acc := 0.0
+var fps_n := 0
 var ville
 
 func _ready() -> void:
@@ -78,7 +82,7 @@ func _environment() -> void:
 	env.fog_enabled = true; env.fog_light_color = Color("e8dcc8"); env.fog_density = 0.0004; env.fog_aerial_perspective = 0.15
 	env.adjustment_enabled = true; env.adjustment_saturation = 1.18
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
-	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-38, -35, 0); sun.light_energy = 2.2; sun.light_color = Color("fff2dc")
+	sun = DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-38, -35, 0); sun.light_energy = 2.2; sun.light_color = Color("fff2dc")
 	sun.shadow_enabled = true; sun.directional_shadow_max_distance = 110; sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS; add_child(sun)
 
 func _mat(tex: String, col: Color, scale: float, rough := 0.9) -> StandardMaterial3D:
@@ -533,7 +537,8 @@ func _process(dt: float) -> void:
 	else: cam.global_position = want
 	cam.look_at(look)
 	frames += 1
-	fps_label.text = "%d images/s" % Engine.get_frames_per_second()
+	fps_label.text = "%d images/s · qualité %s" % [Engine.get_frames_per_second(), ["très basse", "basse", "moyenne", "haute"][level]]
+	_auto_quality(dt)
 	if driving: hint.text = "F : descendre de la voiture"
 	elif avatar.global_position.distance_to(car.global_position) < 4.0: hint.text = "F : monter dans la voiture"
 	else: hint.text = ""
@@ -542,6 +547,28 @@ func _process(dt: float) -> void:
 	if frames == 600: print("FPS ", Engine.get_frames_per_second())
 	if capture != "" and frames == 120:
 		get_viewport().get_texture().get_image().save_png(capture); get_tree().quit()
+
+# le jeu s'adapte a l'ordinateur : moyenne sur 3 s, on baisse sous 28 images/s, on remonte au-dessus de 50
+func _auto_quality(dt: float) -> void:
+	if capture != "" or frames < 200: return # pas pendant le chargement
+	fps_acc += 1.0 / maxf(dt, 0.001); fps_n += 1
+	if fps_n < int(3.0 / maxf(dt, 0.001)): return
+	var avg := fps_acc / fps_n; fps_acc = 0.0; fps_n = 0
+	var old := level
+	if avg < 28 and level > 0: level -= 1
+	elif avg > 50 and level < 3: level += 1
+	if level != old: _apply_quality()
+
+func _apply_quality() -> void:
+	var vp := get_viewport()
+	vp.scaling_3d_scale = [0.5, 0.6, 0.7, 0.85][level]
+	sun.shadow_enabled = level > 0
+	sun.directional_shadow_max_distance = [0.0, 50.0, 110.0, 180.0][level]
+	cam.far = [450.0, 600.0, 900.0, 1200.0][level]
+	for n in get_children(): # objets dessines moins loin quand l'ordinateur peine
+		if n is MultiMeshInstance3D and n.visibility_range_end > 0:
+			if not n.has_meta("vis0"): n.set_meta("vis0", n.visibility_range_end)
+			n.visibility_range_end = n.get_meta("vis0") * [0.55, 0.75, 1.0, 1.25][level]
 
 func _capture_view() -> Array:
 	match view:
