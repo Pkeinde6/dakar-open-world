@@ -1275,7 +1275,11 @@ function streetLights(byRoad, cols, lamps) {
 }
 // public square: paved from its garden to the streets around, benches facing the garden, shade trees (neems) and a few palms
 const plazaMat = new THREE.MeshStandardMaterial({ color: 0xd8d0c2, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -0.8, polygonOffsetUnits: -0.8 });
-pbr(plazaMat, 'interlocking_concrete_pavers', { tint: new THREE.Color(2.3, 2.2, 2.05) });
+pbr(plazaMat, 'interlocking_concrete_pavers', { tint: new THREE.Color(2.5, 2.45, 2.35) });
+// the scanned pavers are brick red; Dakar squares and sidewalks are grey-beige concrete: keep only a hint of the red
+const greyPavers = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+  diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(.3, .55, .15))) * vec3(1.04, 1.0, .93), diffuseColor.rgb, .15);`); };
+plazaMat.onBeforeCompile = greyPavers; sideMat.onBeforeCompile = greyPavers;
 const benchMat = new THREE.MeshStandardMaterial({ color: 0xcfc6b4, roughness: 0.85 });
 function squareContent(group, o, near, cols, neems, palms, benches) {
   const gardens = near.filter(v => v.kind === 'vert' && v.t === 0 && v.pts && v.maxx > o.minx && v.minx < o.maxx && v.maxz > o.minz && v.minz < o.maxz);
