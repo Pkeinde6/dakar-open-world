@@ -98,7 +98,8 @@ func _turn(c: Dictionary) -> void: # au bout de la rue : une autre rue qui part 
 	else: c.dir = -1; c.s = _cum(c.r, c.r.pts.size() - 1)
 
 func _red_ahead(p: Vector2, d: Vector2) -> bool:
-	if main.ville == null or main.ville.tl_mats.is_empty() or main.ville.tl_mats.g.emission_energy_multiplier > 0.0: return false
+	var grp := "A" if absf(d.x) > absf(d.y) else "B" # meme groupe que le feu de sa direction
+	if preload("res://scripts/ville.gd").light_state(main.clock, grp) == "g": return false
 	for sg in data.signals:
 		var q := Vector2(sg[0], sg[1]) - p
 		if q.length() < 16 and q.length() > 4 and q.normalized().dot(d) > 0.7: return true
@@ -127,7 +128,7 @@ func _physics_process(dt: float) -> void:
 		if c.s > total or c.s < 0: _turn(c); continue
 		var lane: float = r.w / 4.0 if not r.ow else 0.0 # on roule a droite
 		var n := Vector2(-d.y, d.x)
-		var pos := Vector3(p.x - n.x * lane, cur[2] + 0.05, p.y - n.y * lane)
+		var pos := Vector3(p.x + n.x * lane, cur[2] + 0.05, p.y + n.y * lane) # n = droite de la voiture : on roule a droite, comme au Senegal
 		c.pos = pos; c.body.global_transform = Transform3D(Basis(Vector3.UP, atan2(d.x, d.y)), pos)
 		# choc avec la voiture du joueur : plus d'etoiles de police
 		c.hit -= dt

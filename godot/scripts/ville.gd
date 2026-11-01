@@ -370,9 +370,10 @@ func furniture() -> void:
 	_multi(wpole, m._plain(Color("6b5440"), 1.0), wp)
 	var wm := MeshInstance3D.new(); wm.mesh = wire.commit(); wm.material_override = m._plain(Color(0.08, 0.08, 0.08)); m.add_child(wm)
 	# feux tricolores aux vrais carrefours OSM : mat, boitier, trois feux qui changent
-	for c in ["r", "y", "g"]:
-		var mt := StandardMaterial3D.new(); mt.albedo_color = Color(0.1, 0.1, 0.1); mt.emission_enabled = true
-		mt.emission = {"r": Color(1, 0.1, 0.05), "y": Color(1, 0.7, 0.05), "g": Color(0.1, 1, 0.3)}[c]; tl_mats[c] = mt
+	for grp in ["A", "B"]: # A : rues plutot est-ouest, B : plutot nord-sud ; quand l'un est vert, l'autre est rouge
+		for c in ["r", "y", "g"]:
+			var mt := StandardMaterial3D.new(); mt.albedo_color = Color(0.1, 0.1, 0.1); mt.emission_enabled = true
+			mt.emission = {"r": Color(1, 0.1, 0.05), "y": Color(1, 0.7, 0.05), "g": Color(0.1, 1, 0.3)}[c]; tl_mats[grp + c] = mt
 	var dark: StandardMaterial3D = m._plain(Color(0.12, 0.12, 0.12), 0.5); var bulb := SphereMesh.new(); bulb.radius = 0.12; bulb.height = 0.24
 	for sgn in data.signals:
 		var p := Vector2(sgn[0], sgn[1]); var nr := nearest(p)
@@ -384,14 +385,16 @@ func furniture() -> void:
 		var n := Vector2(-dir.y, dir.x); var q: Vector2 = nr.p + n * (r.w / 2.0 + 0.8)
 		var g := Node3D.new(); g.position = Vector3(q.x, 0, q.y); g.rotation.y = atan2(-dir.x, -dir.y); m.add_child(g)
 		m._part(g, cyl.call(0.06, 0.08, 3.6), Vector3(0, 1.8, 0), dark, true); m._part(g, box.call(0.35, 1.0, 0.3), Vector3(0, 3.9, 0), dark, false)
+		var grp := "A" if absf(dir.x) > absf(dir.y) else "B"
 		for k in 3:
-			var c: String = ["r", "y", "g"][k]; var bm := MeshInstance3D.new(); bm.mesh = bulb; bm.material_override = tl_mats[c]; bm.position = Vector3(0, 4.25 - k * 0.33, 0.14); g.add_child(bm)
+			var c: String = ["r", "y", "g"][k]; var bm := MeshInstance3D.new(); bm.mesh = bulb; bm.material_override = tl_mats[grp + c]; bm.position = Vector3(0, 4.25 - k * 0.33, 0.14); g.add_child(bm)
 
-# cycle des feux : vert 12 s, orange 3 s, rouge 15 s
+# cycle des feux sur 30 s : groupe A vert 12 s, orange 3 s, rouge 15 s ; groupe B decale de 15 s (vert quand A est rouge)
+static func light_state(t: float, grp: String) -> String:
+	var ph := fmod(t + (15.0 if grp == "B" else 0.0), 30.0)
+	return "g" if ph < 12 else ("y" if ph < 15 else "r")
 func tick_lights(t: float) -> void:
-	if tl_mats.is_empty(): return
-	var ph := fmod(t, 30.0); var on := "g" if ph < 12 else ("y" if ph < 15 else "r")
-	for c in tl_mats: tl_mats[c].emission_energy_multiplier = 3.0 if c == on else 0.0
+	for k in tl_mats: tl_mats[k].emission_energy_multiplier = 3.0 if light_state(t, k[0]) == k[1] else 0.0
 
 # ---------------------------------------------------------------- vie de rue : voitures garees, kiosques, toits, murs de concession
 const CARS := {"taxisn": 4.3, "peugeot405": 4.4, "clando": 4.4, "mercedes": 4.5, "carrapide": 5.8, "ndiaga": 7.0}
