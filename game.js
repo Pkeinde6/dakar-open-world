@@ -143,6 +143,22 @@ function roadOverlap(x, z, margin = 0.4) {
   }
   return worst > 0 ? { o: worst, px, pz } : null;
 }
+// un batiment que l'axe d'une rue traverse barre la rue : on l'abandonne (meme regle que Godot, quartier.gd)
+function crossedByRoad(pts) {
+  let cx = 0, cz = 0; for (const p of pts) { cx += p[0]; cz += p[1]; } cx /= pts.length; cz /= pts.length;
+  const cut = (a, b, c, d) => { const o = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]); return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0; };
+  const gx = cellOf(cx), gz = cellOf(cz);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+    const s = segGrid.get(ckey(gx + a, gz + b)); if (!s) continue;
+    for (let j = 0; j < s.length; j += 2) {
+      const r = roads[s[j]], i = s[j + 1]; if (r.t === 9 || r.y) continue;
+      const A = r.pts[i], B = r.pts[i + 1];
+      if (inPoly(A[0], A[1], pts) || inPoly(B[0], B[1], pts)) return true;
+      for (let e = 0; e < pts.length; e++) if (cut(A, B, pts[e], pts[(e + 1) % pts.length])) return true;
+    }
+  }
+  return false;
+}
 // nudge a point off every carriageway (margin < 0 lets it stand on the sidewalk); null if it can't be cleared
 function clearOfRoads(x, z, margin = 0.4) { for (let it = 0; it < 4; it++) { const ov = roadOverlap(x, z, margin); if (!ov) return [x, z]; if (ov.o > 8) return null; x += ov.px * (ov.o + 0.05); z += ov.pz * (ov.o + 0.05); } return null; }
 function nearestRoad(x, z, maxCells = 1, filter) {
@@ -289,9 +305,9 @@ const isWater = (x, z) => waterPoly && x < 46000 && inPoly(x, z, waterPoly);
 const canvas = $('game');
 // Quality presets (P to switch). "Bas" is tuned for integrated GPUs (Intel UHD).
 const QUALITY = [
-  { name: 'Bas', pr: 0.75, shadow: 0, radius: 2, traffic: 12, peds: 10, bloom: false, bshadow: false, fog: 0.0024 },
-  { name: 'Moyen', pr: 1, shadow: 1024, radius: 3, traffic: 20, peds: 20, bloom: true, bshadow: false, fog: 0.0014 },
-  { name: 'Haut', pr: Math.min(devicePixelRatio, 1.5), shadow: 2048, radius: 4, traffic: 26, peds: 34, bloom: true, bshadow: true, fog: 0.0011 },
+  { name: 'Bas', pr: 0.75, shadow: 1024, sh: 45, radius: 2, traffic: 12, peds: 10, bloom: false, bshadow: true, fog: 0.0024 },
+  { name: 'Moyen', pr: 1, shadow: 1024, sh: 55, radius: 3, traffic: 20, peds: 20, bloom: true, bshadow: false, fog: 0.0014 },
+  { name: 'Haut', pr: Math.min(devicePixelRatio, 1.5), shadow: 2048, sh: 70, radius: 4, traffic: 26, peds: 34, bloom: true, bshadow: true, fog: 0.0011 },
 ];
 let qIdx = (() => { try { const v = localStorage.getItem('dow-quality'); if (v != null) return +v; } catch (e) { } return /Intel|UHD|Iris|Mali|Adreno/i.test(gpuName()) ? 0 : 1; })();
 function gpuName() { try { const g = document.createElement('canvas').getContext('webgl'); const e = g.getExtension('WEBGL_debug_renderer_info'); return e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : ''; } catch (e) { return ''; } }
@@ -300,7 +316,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPrefer
 renderer.setPixelRatio(Q.pr);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.85;
+renderer.toneMapping = THREE.AgXToneMapping; renderer.toneMappingExposure = 0.85; // AgX comme Godot (TONE_MAPPER_AGX)
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 9000);
 
@@ -309,13 +325,13 @@ const su = sky.material.uniforms; su.turbidity.value = 8; su.rayleigh.value = 1.
 const sunDir = new THREE.Vector3();
 const hemi = new THREE.HemisphereLight(0xfff1dc, 0xb08a5a, 0.7); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffe2b8, 2.6); sun.castShadow = true;
-sun.shadow.mapSize.set(Q.shadow || 512, Q.shadow || 512); renderer.shadowMap.enabled = Q.shadow > 0; Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 600 }); sun.shadow.bias = -0.0004;
+sun.shadow.mapSize.set(Q.shadow || 512, Q.shadow || 512); renderer.shadowMap.enabled = Q.shadow > 0; Object.assign(sun.shadow.camera, { left: -Q.sh, right: Q.sh, top: Q.sh, bottom: -Q.sh, near: 1, far: 600 }); sun.shadow.bias = -0.0004;
 scene.add(sun, sun.target);
 const pmrem = new THREE.PMREMGenerator(renderer);
 let envRT = null;
 
-const MODES = [{ name: 'Golden hour', elev: 9, az: 250, fog: 0xe9c9a0, exp: 0.8, sun: 2.6, hemi: 0.7, night: 0, hdr: 'qwantani_late_afternoon_puresky' },
-               { name: 'Midi', elev: 60, az: 200, fog: 0xcfe0ea, exp: 0.7, sun: 3.0, hemi: 0.9, night: 0, hdr: 'kloofendal_48d_partly_cloudy_puresky' },
+const MODES = [{ name: 'Golden hour', elev: 26, az: 250, fog: 0xe9c9a0, exp: 1.0, sun: 3.2, hemi: 0.35, night: 0, hdr: 'qwantani_late_afternoon_puresky' },
+               { name: 'Midi', elev: 60, az: 200, fog: 0xcfe0ea, exp: 0.9, sun: 3.4, hemi: 0.45, night: 0, hdr: 'kloofendal_48d_partly_cloudy_puresky' },
                { name: 'Nuit', elev: -6, az: 250, fog: 0x0b1424, exp: 0.9, sun: 0.15, hemi: 0.12, night: 1, hdr: 'qwantani_night_puresky' }];
 // HDRI environments (image-based lighting), loaded lazily; procedural sky env is the fallback
 const hdrEnv = {}, rgbe = new RGBELoader();
@@ -333,7 +349,7 @@ function applyMode() {
   hemi.intensity = m.hemi; scene.fog.color.set(m.fog); renderer.toneMappingExposure = m.exp;
   if (envRT) envRT.dispose();
   const s2 = new THREE.Scene(); const sk = sky.clone(); s2.add(sk); envRT = pmrem.fromScene(s2); scene.environment = hdrEnv[m.hdr] || envRT.texture; loadHdr(m);
-  scene.environmentIntensity = night ? 0.35 : 0.9;
+  scene.environmentIntensity = night ? 0.35 : 0.55; // le soleil doit dominer le ciel, sinon les ombres disparaissent
   sky.visible = !night; scene.background = night ? new THREE.Color(0x05080f) : null;
   for (const m2 of nightMats) m2.emissiveIntensity = night ? m2.userData.nightI : (m2.userData.dayI || 0);
   bloom.strength = night ? 0.9 : 0.25;
@@ -975,7 +991,7 @@ function buildChunk(gx, gz) {
     if (kind !== 1) { // OSM footprints and road widths disagree: pull walls back behind the sidewalk
       let moved = 0;
       for (const q of pts) for (let it = 0; it < 3; it++) { const ov = roadOverlap(q[0], q[1]); if (!ov) break; if (ov.o > 6) { moved = -1e9; break; } q[0] += ov.px * ov.o; q[1] += ov.pz * ov.o; moved++; }
-      if (moved < 0) continue;
+      if (moved < 0 || crossedByRoad(pts)) continue;
       let ar = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; ar += x1 * z2 - x2 * z1; } if (Math.abs(ar) < 12) continue;
     }
     const st = styleAt(x, z), bcx = pts.reduce((a, p) => a + p[0], 0) / pts.length, bcz = pts.reduce((a, p) => a + p[1], 0) / pts.length;
@@ -1702,6 +1718,9 @@ const keys = {};
 addEventListener('keydown', e => {
   if (e.repeat) return; keys[e.code] = true; initAudio();
   if (fullOpen && (e.code === 'KeyM' || e.code === 'Escape')) return toggleFullMap(false);
+  if ($('ctrlpanel').style.display === 'flex') { if (e.code === 'Escape') showControls(false); return; }
+  if (e.code === 'Escape') return togglePause();
+  if (paused) return;
   switch (e.code) {
     case 'KeyM': toggleFullMap(true); break;
     case 'KeyC': camMode = (camMode + 1) % 3; break;
@@ -2416,7 +2435,7 @@ let station = 0, beatT = 0, step = 0, newsT = 5;
 const NEWS = [
   "Flash trafic : ça bouchonne sur la VDN et à la sortie de Colobane. Prudence.",
   "Le Magal de Touba approche, des milliers de pèlerins sont attendus. Les cars partent des Baux Maraîchers.",
-  "Météo : grand soleil sur Dakar, 31 degrés, un peu d'harmattan en fin de journée.",
+  "Météo : grand soleil sur Dakar, 25 degrés, un peu d'harmattan en fin de journée.",
   "Autoroute à péage : circulation fluide entre Dakar et Diamniadio.",
   "Les chauffeurs de cars rapides rappellent : pas de surcharge, la sécurité d'abord.",
   "Lutte : grand combat ce week-end à l'Arène nationale de Pikine.",
@@ -2667,11 +2686,35 @@ function skipTravel() { // fast-forward a long regional trip
   if (url.has('cap')) player.h = THREE.MathUtils.degToRad(+url.get('cap'));
   window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, get chunks() { return chunks; } };
   $('loadtxt').textContent = 'Prêt. Bienvenue à Dakar.';
-  const btn = $('start'); btn.style.display = 'block';
-  const go = () => { $('loading').style.display = 'none'; initAudio(); chapterCard(); };
-  btn.onclick = go; addEventListener('keydown', e => { if (!started && e.code === 'Enter') go(); });
+  $('menubtns').style.display = 'flex'; $('start').focus();
+  const go = () => { if ($('loading').style.display === 'none') return; $('loading').style.display = 'none'; document.body.classList.add('playing'); initAudio(); chapterCard();
+    if (document.body.classList.contains('touch')) fullscreen(true); };
+  $('start').onclick = go; addEventListener('keydown', e => { if (!started && e.code === 'Enter' && $('ctrlpanel').style.display !== 'flex') go(); });
   loop();
 })();
+
+// ---------------- Menus (titre, pause, commandes) ----------------
+function setQuality(i) { if (i === qIdx) return; try { localStorage.setItem('dow-quality', i); } catch (e) { } const msg = `Qualité : ${QUALITY[i].name} — rechargement…`; toast(msg); $('loadtxt').textContent = msg; setTimeout(() => location.reload(), 600); }
+for (const el of document.querySelectorAll('.qsel')) {
+  el.innerHTML = QUALITY.map((q, i) => `<button role="radio" aria-checked="${i === qIdx}" class="${i === qIdx ? 'on' : ''}" data-q="${i}">${q.name}</button>`).join('');
+  el.addEventListener('click', e => { const b = e.target.closest('[data-q]'); if (b) setQuality(+b.dataset.q); });
+}
+function showControls(on) { $('ctrlpanel').style.display = on ? 'flex' : 'none'; if (on) $('ctrlclose').focus(); }
+for (const b of document.querySelectorAll('[data-ctrl]')) b.onclick = () => showControls(true);
+$('ctrlclose').onclick = () => showControls(false);
+function fullscreen(on) {
+  try { if (on && !document.fullscreenElement) document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }).then(() => screen.orientation?.lock?.('landscape')).catch(() => { });
+    else if (!on && document.fullscreenElement) document.exitFullscreen(); } catch (e) { }
+}
+$('fullscr').onclick = () => fullscreen(!document.fullscreenElement);
+let paused = false;
+function togglePause(on = !paused) {
+  if (on && (!started || $('loading').style.display !== 'none')) return; // pas pendant l'ecran titre ni une carte de chapitre
+  paused = on; started = !on; $('pause').style.display = on ? 'flex' : 'none';
+  for (const k in keys) keys[k] = false;
+  if (on) $('resume').focus();
+}
+$('resume').onclick = () => togglePause(false);
 
 // ---------------- Mobile touch controls ----------------
 // Touch buttons feed the same `keys` map as the keyboard; one-shot actions replay their key as a keydown.
@@ -2679,7 +2722,7 @@ if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) {
   document.body.classList.add('touch');
   const pad = document.createElement('div'); pad.id = 'touchpad';
   const hold = [['tl', '◀', 'ArrowLeft'], ['tr', '▶', 'ArrowRight'], ['tb', 'FREIN', 'ArrowDown'], ['tg', 'GAZ', 'ArrowUp'], ['tn', 'NITRO', 'ShiftLeft'], ['th', 'FREIN À MAIN', 'Space']];
-  const taps = [['KeyH', '📯'], ['KeyC', '🎥'], ['KeyY', '📻'], ['KeyV', '🚗'], ['KeyM', '🗺️'], ['KeyN', '🌗'], ['KeyJ', '⏩'], ['KeyR', '↺']];
+  const taps = [['KeyH', '📯'], ['KeyC', '🎥'], ['KeyY', '📻'], ['KeyV', '🚗'], ['KeyM', '🗺️'], ['KeyN', '🌗'], ['KeyJ', '⏩'], ['Escape', '⏸']];
   pad.innerHTML = hold.map(([id, t]) => `<button id="${id}" class="tbtn">${t}</button>`).join('') + `<div id="tact">${taps.map(([c, t]) => `<button class="tbtn" data-k="${c}">${t}</button>`).join('')}</div>`;
   document.body.appendChild(pad);
   for (const [id, , code] of hold) {
@@ -2688,5 +2731,6 @@ if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) {
   }
   for (const b of pad.querySelectorAll('[data-k]')) b.addEventListener('pointerdown', (e) => { e.preventDefault(); dispatchEvent(new KeyboardEvent('keydown', { code: b.dataset.k })); setTimeout(() => dispatchEvent(new KeyboardEvent('keyup', { code: b.dataset.k })), 80); });
   let savedQ = null; try { savedQ = localStorage.getItem('dow-quality'); } catch (e) { }
-  if (savedQ === null) { qIdx = 0; Q = QUALITY[0]; renderer.setPixelRatio(Q.pr); }
+  if (savedQ === null) { qIdx = 0; Q = QUALITY[0]; for (const b of document.querySelectorAll('.qsel [data-q]')) { const on = +b.dataset.q === qIdx; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); } }
+  renderer.setPixelRatio(Math.max(Q.pr, Math.min(devicePixelRatio, 2) * 0.5)); // 0,75 pixel par point est trop flou sur un ecran de telephone
 }
