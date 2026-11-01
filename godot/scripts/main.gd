@@ -18,6 +18,7 @@ var frames := 0
 var occupied := {} # cellules de 4 m prises par un batiment, une station : pas d'arbre dedans
 var junctions := {} # noeud (arrondi au metre) -> nombre de routes qui s'y croisent
 var concrete: StandardMaterial3D
+var fps_label: Label
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -42,7 +43,8 @@ func _ready() -> void:
 	avatar.global_position = car.global_position + car.global_basis.x * 2.6
 	_police()
 	_passersby()
-	cam = Camera3D.new(); cam.fov = 60; cam.far = 2500; add_child(cam)
+	cam = Camera3D.new(); cam.fov = 60; cam.far = 900; add_child(cam)
+	var hud := CanvasLayer.new(); add_child(hud); fps_label = Label.new(); fps_label.position = Vector2(12, 8); fps_label.add_theme_font_size_override("font_size", 22); hud.add_child(fps_label)
 
 # ---------------------------------------------------------------- lumiere et sol
 func _environment() -> void:
@@ -51,13 +53,13 @@ func _environment() -> void:
 	env.background_mode = Environment.BG_SKY; env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY; env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
-	env.ssao_enabled = true; env.ssao_radius = 1.5; env.ssao_intensity = 2.0; env.ssil_enabled = true
+	env.ssao_enabled = false; env.ssil_enabled = false # trop lourds pour une puce integree
 	env.glow_enabled = true; env.glow_intensity = 0.4
 	env.fog_enabled = true; env.fog_light_color = Color("e8dcc8"); env.fog_density = 0.0004; env.fog_aerial_perspective = 0.15
 	env.adjustment_enabled = true; env.adjustment_saturation = 1.08
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
 	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-38, -35, 0); sun.light_energy = 2.2; sun.light_color = Color("fff2dc")
-	sun.shadow_enabled = true; sun.directional_shadow_max_distance = 260; sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS; add_child(sun)
+	sun.shadow_enabled = true; sun.directional_shadow_max_distance = 110; sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS; add_child(sun)
 
 func _mat(tex: String, col: Color, scale: float, rough := 0.9) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new(); m.albedo_texture = load(tex); m.albedo_color = col; m.roughness = rough
@@ -366,7 +368,7 @@ func _forest(path: String, spots: Array, rng: RandomNumberGenerator, trunk_r: fl
 		var s := rng.randf_range(0.8, 1.25) * (0.62 if path.contains("neem") else 1.0); var q: Vector2 = spots[i] # neems de rue : 6-7 m
 		mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s)), Vector3(q.x, 0, q.y)))
 		var body := StaticBody3D.new(); var cs := CollisionShape3D.new(); var sh := CylinderShape3D.new(); sh.radius = trunk_r * s; sh.height = 3; cs.shape = sh; cs.position.y = 1.5; body.add_child(cs); body.position = Vector3(q.x, 0, q.y); add_child(body)
-	var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; add_child(mi)
+	var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.visibility_range_end = 260.0; mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON; add_child(mi)
 	scn.queue_free()
 
 var _leaf: StandardMaterial3D
@@ -418,7 +420,7 @@ func _police() -> void:
 	var idle: AnimationPlayer = load("res://models/mixamo/idle.fbx").instantiate().find_child("AnimationPlayer", true, false)
 	var count := 0
 	for k in junctions:
-		if junctions[k] < 4 or count >= 8: continue
+		if junctions[k] < 4 or count >= 4: continue
 		var xy := String(k).split(","); var p := Vector2(float(xy[0]), float(xy[1]))
 		var big := false
 		for r in data.roads:
@@ -438,7 +440,7 @@ func _passersby() -> void:
 	var roads: Array = data.roads.filter(func(r): return r.side > 1.0 and r.y == null and r.pts.size() > 1 and Vector2(r.pts[0][0], r.pts[0][1]).distance_to(Vector2(860, 400)) < 500)
 	if roads.is_empty(): return
 	var tops := [Color("1f4fa0"), Color("8a1c2b"), Color("0f6b4a"), Color("f2f0ea"), Color("d9b44a"), Color("5b2a86"), Color("c96a1b")]
-	for i in 18:
+	for i in 8: # chaque passant Mixamo est lourd (65 os, 50 000 triangles)
 		var r: Dictionary = roads[rng.randi() % roads.size()]
 		var who := _person({"Body": [Color(0.3, 0.18, 0.12), Color(0.36, 0.22, 0.15), Color(0.42, 0.27, 0.18)][i % 3], "Sweater": tops[rng.randi() % tops.size()], "Pants": [Color("2c4a73"), Color("222222"), Color("c8b27a"), Color("f2f0ea")][rng.randi() % 4], "Hair": Color(0.08, 0.06, 0.05)})
 		var npc := preload("res://scripts/passant.gd").new(); add_child(npc); npc.setup_node(who, r, rng.randf(), 1 if rng.randf() < 0.5 else -1)
@@ -487,6 +489,8 @@ func _process(dt: float) -> void:
 	else: cam.global_position = want
 	cam.look_at(look)
 	frames += 1
+	fps_label.text = "%d images/s" % Engine.get_frames_per_second()
+	if frames == 600: print("FPS ", Engine.get_frames_per_second())
 	if capture != "" and frames == 120:
 		get_viewport().get_texture().get_image().save_png(capture); get_tree().quit()
 
