@@ -1623,14 +1623,15 @@ function flushProps(group) { // une seule InstancedMesh par piece de modele et p
   delete group.userData.props;
 }
 // gens de Dakar, chat et oiseaux modelises dans Blender (tools/gens_blender.py)
-const GENS_TYPES = { boubou: 3, kaftan: 3, jeune: 3, costume: 1.5, drianke: 3, vendeuse: 2, jeunefemme: 3, bayefall: 0.7, ecolier: 1.5 }, GENS = {}; let catGLB = null, birdGLB = null;
+const GENS_TYPES = { passant: 8, boubou: 3, kaftan: 2, jeune: 1, costume: 1, drianke: 3, vendeuse: 2, jeunefemme: 2, bayefall: 0.7, ecolier: 1.5 }, GENS = {}; let catGLB = null, birdGLB = null; // passant : humain Mixamo realiste (tools/mixamo_web_blender.py)
 async function loadAll(progress) {
   const names = Object.keys(CAR_CFG), props = Object.keys(PROP_CFG); let done = 0; const total = names.length + props.length + Object.keys(GENS_TYPES).length + 1;
   const tick = () => progress(++done / total);
   await Promise.all([
     ...names.map(n => loader.loadAsync(`models/${n}.glb`).then(g => { MODELS[n] = normalize(g.scene, CAR_CFG[n]); }).catch(e => console.warn('model', n, e)).finally(tick)),
     ...props.map(n => loader.loadAsync(`models/${n}.glb`).then(g => { PROPS[n] = normalize(g.scene, PROP_CFG[n]); }).catch(e => console.warn('prop', n, e)).finally(tick)),
-    ...Object.keys(GENS_TYPES).map(n => loader.loadAsync(`models/gens_${n}.glb`).then(g => { GENS[n] = g; }).catch(e => console.warn('gens', n, e)).finally(tick)),
+    ...Object.keys(GENS_TYPES).map(n => loader.loadAsync(n === 'passant' ? 'models/passant.glb' : `models/gens_${n}.glb`).then(g => {
+      GENS[n] = g; }).catch(e => console.warn('gens', n, e)).finally(tick)),
     loader.loadAsync('models/chat.glb').then(g => { catGLB = g; }).catch(e => console.warn(e)).finally(tick),
     loader.loadAsync('models/oiseau.glb').then(g => { birdGLB = g; }).catch(e => console.warn(e)),
     ...Object.keys(HOUSE_GEO).map(n => loader.loadAsync(`models/${n}.glb`).then(g => { HOUSE_GEO[n] = houseGeometry(g.scene); }).catch(e => console.warn('maison', n, e))),
@@ -1846,6 +1847,10 @@ const patchTex = canvasTex(128, 128, (g) => { // ndiakhass des Baye Fall : morce
 function dressGens(g, type) { // per-person colours: skin, main cloth (wax print or bazin), second cloth, basin
   const wax = type !== 'boubou' && Math.random() < 0.7, main = new THREE.Color(pick(BAZIN)), second = Math.random() < 0.5 ? main.clone() : new THREE.Color(pick(BAZIN)), tex = pick(WAX), skin = pick(SKIN);
   g.traverse(o => { if (!o.isMesh) return; o.castShadow = true; o.frustumCulled = false; const n = o.material.name; o.material = o.material.clone(); const m = o.material;
+    if (type === 'passant') { // Mixamo : textures realistes teintees (peau noire, habits de couleurs variees)
+      if (/Body/.test(o.name)) m.color.set(skin).multiplyScalar(2.2); else if (/Hair|Eyelash/.test(o.name)) m.color.set(0x151210);
+      else if (/Sweater/.test(o.name)) m.color.set(pick(BAZIN)); else if (/Pants/.test(o.name)) m.color.set(pick([0x2c4a73, 0x222222, 0xc8b27a, 0xf2f0ea, 0x5a4a3a]));
+      return; }
     if (n === 'Peau') m.color.set(skin);
     else if (n === 'Tissu') { if (wax) { m.map = tex; m.color.set(0xffffff); } else { m.color.copy(main); m.roughness = 0.35; m.metalness = 0.15; } } // bazin riche : brillant
     else if (n === 'Tissu2') m.color.copy(type === 'boubou' ? (Math.random() < 0.5 ? main : new THREE.Color(0xf4f1ea)) : second);
