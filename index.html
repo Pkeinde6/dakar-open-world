@@ -15,7 +15,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root{--hud:#fff;--accent:#f2c230;--wd:#c8f7ff}
-  html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:Inter,system-ui,sans-serif;color:#fff;user-select:none}
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:Inter,system-ui,sans-serif;color:#fff;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  /* appui long sur iPhone : ni selection, ni loupe, ni menu */
+  *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   canvas#game{display:block}
   .hud{position:fixed;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.9)}
   /* GTA-style wanted stars */
@@ -223,6 +225,6 @@
   "3d-tiles-renderer": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.39/src/index.js"
 } }
 </script>
-<script type="module" src="game.js?v=71"></script>
+<script type="module" src="game.js?v=72"></script>
 </body>
 </html>

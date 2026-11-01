@@ -65,3 +65,71 @@ workflows:
         notify:
           success: true
           failure: true
+
+  # Le SITE (game.js, three.js) emballe dans une vraie appli iPhone avec Capacitor, tout Dakar dedans (hors ligne),
+  # puis envoye sur TestFlight. Meme appli App Store Connect que la version Godot (com.rangu.dakarOpenWorld),
+  # en version 0.2 : ses numeros de build ne se melangent pas avec ceux de la 0.1 (Godot).
+  # Lancement : une etiquette `site-ios-…` poussee sur GitHub, ou « Start new build » > site-ios sur codemagic.io.
+  site-ios:
+    name: Site iOS TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'site-ios-*'
+          include: true
+    integrations:
+      app_store_connect: Rangu Codemagic
+    environment:
+      vars:
+        BUNDLE_ID: com.rangu.dakarOpenWorld
+        VERSION: 0.2.0
+      node: 20
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.rangu.dakarOpenWorld
+    scripts:
+      - name: Dossier www (site + three.js embarque)
+        script: |
+          npm init -y > /dev/null
+          npm i three@0.160.0 @capacitor/core@6 @capacitor/cli@6 @capacitor/ios@6 --no-audit --no-fund
+          node tools/app_www.mjs
+      - name: Projet iOS Capacitor
+        script: |
+          npx cap init "Dakar Open World" "$BUNDLE_ID" --web-dir www
+          npx cap add ios
+          # icone 1024 px, appli a l'horizontale et plein ecran, pas de chiffrement a declarer
+          cp godot/icone.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+          plist=ios/App/App/Info.plist
+          for k in UISupportedInterfaceOrientations "UISupportedInterfaceOrientations~ipad"; do
+            /usr/libexec/PlistBuddy -c "Delete :$k" $plist || true
+            /usr/libexec/PlistBuddy -c "Add :$k array" $plist
+            /usr/libexec/PlistBuddy -c "Add :$k:0 string UIInterfaceOrientationLandscapeRight" $plist
+            /usr/libexec/PlistBuddy -c "Add :$k:1 string UIInterfaceOrientationLandscapeLeft" $plist
+          done
+          /usr/libexec/PlistBuddy -c "Add :UIRequiresFullScreen bool true" $plist || true
+          /usr/libexec/PlistBuddy -c "Add :UIStatusBarHidden bool true" $plist || true
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" $plist || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Dakar" $plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Dakar" $plist
+          sed -i '' "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = $VERSION;/; s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $BUILD_NUMBER;/" ios/App/App.xcodeproj/project.pbxproj
+          npx cap sync ios
+      - name: Profils de signature
+        script: xcode-project use-profiles
+      - name: Compilation de l'IPA
+        script: xcode-project build-ipa --workspace ios/App/App.xcworkspace --scheme App
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+      email:
+        recipients:
+          - pkeinde6@gmail.com
+        notify:
+          success: true
+          failure: true

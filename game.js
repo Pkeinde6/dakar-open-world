@@ -3058,6 +3058,8 @@ addEventListener('online', offlineLabel); addEventListener('offline', offlineLab
 // Touch buttons feed the same `keys` map as the keyboard; one-shot actions replay their key as a keydown.
 if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) {
   document.body.classList.add('touch');
+  addEventListener('contextmenu', e => e.preventDefault()); // appui long : pas de menu
+  document.addEventListener('selectstart', e => e.preventDefault());
   const pad = document.createElement('div'); pad.id = 'touchpad';
   const hold = [['tl', '◀', 'ArrowLeft'], ['tr', '▶', 'ArrowRight'], ['tb', 'FREIN', 'ArrowDown'], ['tg', 'GAZ', 'ArrowUp'], ['tn', 'NITRO', 'ShiftLeft'], ['th', 'FREIN À MAIN', 'Space']];
   const taps = [['KeyH', '📯'], ['KeyC', '🎥'], ['KeyY', '📻'], ['KeyV', '🚗'], ['KeyM', '🗺️'], ['KeyN', '🌗'], ['KeyJ', '⏩'], ['Escape', '⏸']];

@@ -1,0 +1,35 @@
+# Publie le site (Dakar Open World dans le navigateur) sur GitHub Pages :
+# https://pkeinde6.github.io/dakar-open-world/ — sur iPhone : Safari > Partager > Sur l'ecran d'accueil.
+name: Site en ligne
+on:
+  push:
+    branches: [main, claude/relaxed-mccarthy-a1wi1w]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploiement.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fichiers du site seulement
+        run: |
+          mkdir _site
+          cp index.html game.js data.js bridges.js lieux.js services.js elev.js brt.js edifices.js sw.js manifest.webmanifest _site/
+          cp -r models textures icones batiments _site/
+          touch _site/.nojekyll
+          du -sh _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploiement
+        uses: actions/deploy-pages@v4
