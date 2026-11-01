@@ -606,17 +606,18 @@ const outsideDakar = x => x > 40000;
 // identical pastel R+1 houses, villas hidden behind white walls and bougainvillea in Fann/Mermoz/Almadies,
 // raw cement-block banlieue in Pikine/Guediawaye, and the low sand-coloured walled compounds of Touba and Diourbel.
 // h = storeys [min, max), shops/roof/chantier/wall = probabilities, bare = unpainted parpaing.
+// res = part de shops gardee dans les rues residentielles (0 : cites et villas sans boutiques), voir wantShops
 const BARE = 0xaaa59b;
 const STYLES = {
-  plateau: { sand: 0, pal: [0xe9d7a8, 0xdcb47c, 0xf2ece0, 0xe3c48f, 0xc98f6a, 0xf0e6d2, 0xd7cfc0, 0xbfcfd6], h: [2, 9], shops: 0.85, roof: 0.15, chantier: 0, bare: 0, wall: 0 },
-  medina: { sand: 0.15, pal: [0xe6c15a, 0x7fb3cf, 0xe08a5b, 0xa9c98f, 0xf0e2c8, 0xdca3a0, 0xc9d3d6, 0xe8d4b0], h: [1, 4.6], shops: 0.65, roof: 0.9, chantier: 0.4, bare: 0.1, wall: 0 },
-  sicap: { sand: 0.1, pal: [0xf0dcb4, 0xe8cfa0, 0xdfe5d3, 0xf3e9d6, 0xe9c9b0, 0xd6e0e4], h: [1, 3], shops: 0.3, roof: 0.7, chantier: 0.2, bare: 0.05, wall: 0.55, wallPal: [0xf3efe6, 0xe8dcc0, 0xe5c99a] },
-  villa: { sand: 0.15, pal: [0xf6f2ea, 0xefe6d6, 0xe8dcc4, 0xf3ebe3, 0xdfd2bd, 0xe9e2d6], h: [1, 3.4], shops: 0.08, roof: 0.35, chantier: 0.08, bare: 0, wall: 0.95, wallPal: [0xf7f4ee, 0xf1ebe0, 0xe6dccb], boug: 0.7 },
-  banlieue: { sand: 0.7, pal: [BARE, BARE, 0xe5d3b0, 0xd9a877, 0xc7d0c9, 0xe8d4b0, 0xc6b9a4], h: [1, 3.3], shops: 0.5, roof: 0.95, chantier: 0.6, bare: 0.4, wall: 0.35, wallPal: [BARE, 0xd8c7a6] },
-  touba: { sand: 0.9, pal: [0xdcae7f, 0xe7c79a, 0xcd9468, 0xefe0c4, 0xe3b9a0, 0xd6c3a2], h: [1, 2.25], shops: 0.3, roof: 0.6, chantier: 0.5, bare: 0.3, wall: 0.8, wallPal: [0xdcae7f, 0xe7c79a, BARE, 0xefe0c4] },
-  diourbel: { sand: 0.6, pal: [0xe2c48e, 0xd9a877, 0xefe2c9, 0xc98f6a, 0xd8c2a0, 0xb9cfb0], h: [1, 2.4], shops: 0.35, roof: 0.6, chantier: 0.4, bare: 0.25, wall: 0.65, wallPal: [0xe2c48e, 0xefe2c9, BARE] },
-  rufisque: { sand: 0.3, pal: [0xe3b878, 0xd08a62, 0xf0e2c8, 0xbfd0c8, 0xe9c98f, 0xc3764f], h: [1, 3], shops: 0.6, roof: 0.6, chantier: 0.25, bare: 0.1, wall: 0.2, wallPal: [0xf0e2c8] },
-  village: { sand: 1, pal: [0xd8c2a0, 0xe0c9a0, 0xc9a57a, 0xe6d5b8], h: [1, 1.6], shops: 0.1, roof: 0.4, chantier: 0.3, bare: 0.4, wall: 0.7, wallPal: [0xd8c2a0, BARE] },
+  plateau: { sand: 0, pal: [0xe9d7a8, 0xdcb47c, 0xf2ece0, 0xe3c48f, 0xc98f6a, 0xf0e6d2, 0xd7cfc0, 0xbfcfd6], h: [2, 9], shops: 0.85, res: 0.6, roof: 0.15, chantier: 0, bare: 0, wall: 0 },
+  medina: { sand: 0.15, pal: [0xe6c15a, 0x7fb3cf, 0xe08a5b, 0xa9c98f, 0xf0e2c8, 0xdca3a0, 0xc9d3d6, 0xe8d4b0], h: [1, 4.6], shops: 0.65, res: 0.45, roof: 0.9, chantier: 0.4, bare: 0.1, wall: 0 },
+  sicap: { sand: 0.1, pal: [0xf0dcb4, 0xe8cfa0, 0xdfe5d3, 0xf3e9d6, 0xe9c9b0, 0xd6e0e4], h: [1, 3], shops: 0.3, res: 0, roof: 0.7, chantier: 0.2, bare: 0.05, wall: 0.55, wallPal: [0xf3efe6, 0xe8dcc0, 0xe5c99a] },
+  villa: { sand: 0.15, pal: [0xf6f2ea, 0xefe6d6, 0xe8dcc4, 0xf3ebe3, 0xdfd2bd, 0xe9e2d6], h: [1, 3.4], shops: 0.08, res: 0, roof: 0.35, chantier: 0.08, bare: 0, wall: 0.95, wallPal: [0xf7f4ee, 0xf1ebe0, 0xe6dccb], boug: 0.7 },
+  banlieue: { sand: 0.7, pal: [BARE, BARE, 0xe5d3b0, 0xd9a877, 0xc7d0c9, 0xe8d4b0, 0xc6b9a4], h: [1, 3.3], shops: 0.5, res: 0.2, roof: 0.95, chantier: 0.6, bare: 0.4, wall: 0.35, wallPal: [BARE, 0xd8c7a6] },
+  touba: { sand: 0.9, pal: [0xdcae7f, 0xe7c79a, 0xcd9468, 0xefe0c4, 0xe3b9a0, 0xd6c3a2], h: [1, 2.25], shops: 0.3, res: 0.1, roof: 0.6, chantier: 0.5, bare: 0.3, wall: 0.8, wallPal: [0xdcae7f, 0xe7c79a, BARE, 0xefe0c4] },
+  diourbel: { sand: 0.6, pal: [0xe2c48e, 0xd9a877, 0xefe2c9, 0xc98f6a, 0xd8c2a0, 0xb9cfb0], h: [1, 2.4], shops: 0.35, res: 0.1, roof: 0.6, chantier: 0.4, bare: 0.25, wall: 0.65, wallPal: [0xe2c48e, 0xefe2c9, BARE] },
+  rufisque: { sand: 0.3, pal: [0xe3b878, 0xd08a62, 0xf0e2c8, 0xbfd0c8, 0xe9c98f, 0xc3764f], h: [1, 3], shops: 0.6, res: 0.3, roof: 0.6, chantier: 0.25, bare: 0.1, wall: 0.2, wallPal: [0xf0e2c8] },
+  village: { sand: 1, pal: [0xd8c2a0, 0xe0c9a0, 0xc9a57a, 0xe6d5b8], h: [1, 1.6], shops: 0.1, res: 0, roof: 0.4, chantier: 0.3, bare: 0.4, wall: 0.7, wallPal: [0xd8c2a0, BARE] },
 };
 // anchors: [place name or [lat, lon], style, radius m]; the nearest anchor (relative to its radius) wins
 const ZONES = [
@@ -793,6 +794,12 @@ function strip(B, ax, az, bx, bz, o, hw, top, bot, colHex, faces) {
 // face and cap, concrete floor slabs showing as a band at each storey, small balconies with railings on the
 // upper floors, and coloured tarps (baches) shading the shops.
 const TARPS = [0x2a6fb5, 0x2f8f5a, 0xd8432f, 0xf2b01e, 0x1d4e89, 0x6b6f75, 0xe9e4da];
+// boutiques en rez-de-chaussee : le long des grands axes ; dans les rues residentielles seulement la ou le quartier en a (Plateau, Medina)
+function wantShops(st, x, z) {
+  const nr = nearestRoad(x, z, 1); if (!nr || nr.d > 30) return false; // batiment en coeur d'ilot : pas de devanture
+  const main = (nr.r.t >= 1 && nr.r.t <= 4) || nr.r.t === 10;
+  return Math.random() < (main ? Math.max(st.shops, 0.35) : st.shops * (st.res || 0));
+}
 function buildingDetails(B, pts, h, colHex, shops, st) {
   if (pts.length > 10) return; // big complex footprints: walls only
   let area = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; area += x1 * z2 - x2 * z1; }
@@ -996,6 +1003,7 @@ function buildChunk(gx, gz) {
     }
     const st = styleAt(x, z), bcx = pts.reduce((a, p) => a + p[0], 0) / pts.length, bcz = pts.reduce((a, p) => a + p[1], 0) / pts.length;
     if (big.some(o => Math.abs(bcx - o.cx) < o.size[0] * 0.6 && Math.abs(bcz - o.cz) < o.size[1] * 0.6)) continue;
+    if (kind !== 1 && (onStation(k, bcx, bcz) || pts.some(p => onStation(k, p[0], p[1], -3)))) continue; // la boutique OSM de la station : remplacee par la station
     { // mosque: OSM building tagged so, or footprint holding a mosque point -> one of the Blender mosques fitted to it
       const mp = mosqs.find(o => !o.model && !usedM.has(o) && bcx > o.cx - 60 && bcx < o.cx + 60 && bcz > o.cz - 60 && bcz < o.cz + 60 && (o.pts ? inPoly(bcx, bcz, o.pts) : inPoly(o.cx, o.cz, pts)));
       if (kind === 1 || mp) { if (mp) usedM.add(mp); const n = mosqueModel(mp && mp.name, Math.max(polyArea(pts), mp ? mp.area : 0)), f = fitOriented(n, obb(pts), mosqueCol(n));
@@ -1006,7 +1014,7 @@ function buildChunk(gx, gz) {
     const fit = kind !== 1 && !lv && !school && Math.random() < 0.6 ? fitHouse(pts, st) : null;
     if (fit) houses.push(fit);
     else if (st === STYLES.plateau && h >= 18 && kind !== 1 && Math.random() < 0.4) addBuilding(GL, pts, h, pick([0xffffff, 0xe6eef0, 0xf0ebe0]), 0xb9b0a0);
-    else { const fc = kind === 1 ? 0xf4f1ea : school ? pick([0xf2d48a, 0xe9c77e, 0xf4efe6, 0xe8b98a]) : facadeOf(st), sh = !school && kind !== 1 && Math.random() < st.shops; addBuilding(B, pts, h, fc, 0xb9b0a0, sh); if (kind !== 1) buildingDetails(B, pts, h, fc, sh, st); }
+    else { const fc = kind === 1 ? 0xf4f1ea : school ? pick([0xf2d48a, 0xe9c77e, 0xf4efe6, 0xe8b98a]) : facadeOf(st), sh = !school && kind !== 1 && wantShops(st, bcx, bcz); addBuilding(B, pts, h, fc, 0xb9b0a0, sh); if (kind !== 1) buildingDetails(B, pts, h, fc, sh, st); }
     if (!fit && !school && kind !== 1 && Math.random() < st.roof) roofExtras(B, RF, pts, h, h > 13, st.chantier);
     const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
     cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
@@ -1031,7 +1039,7 @@ function buildChunk(gx, gz) {
           const wAlong = real ? PROP_CFG[real].len : rand(7, 12), depth = real ? PROP_CFG[real].len * 0.8 : rand(8, 13), off = r.w / 2 + r.side + 0.8 + depth / 2;
           const cx = ax + ux * d - uz * off * s, cz = az + uz * d + ux * off * s;
           const ok = (() => { const okey = Math.round(cx / 6) + ',' + Math.round(cz / 6); if (occ.has(okey)) return false;
-            if (isWater(cx, cz) || roadOverlap(cx, cz) || inOpenLieu(cx, cz) || inSquare(cx, cz, squares)) return false;
+            if (isWater(cx, cz) || roadOverlap(cx, cz) || inOpenLieu(cx, cz) || inSquare(cx, cz, squares) || onStation(k, cx, cz, 4)) return false;
             for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1]]) { const hx = a * wAlong / 2, hz = b * depth / 2; if (roadOverlap(cx + ux * hx - uz * hz, cz + uz * hx + ux * hz)) return false; }
             for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) occ.add((Math.round(cx / 6) + a) + ',' + (Math.round(cz / 6) + b)); return true; })();
           if (!ok) continue;
@@ -1041,7 +1049,7 @@ function buildChunk(gx, gz) {
           const fit = !real && Math.random() < 0.5 ? fitHouse(pts, st) : null;
           if (fit) houses.push(fit);
           else if (real && PROPS[real]) placeProp(group, real, cx, cz, faceRoad);
-          else { const fc = facadeOf(st), sh = Math.random() < st.shops; addBuilding(B, pts, fl * 3.1, fc, 0xb5ab9a, sh); buildingDetails(B, pts, fl * 3.1, fc, sh, st); if (Math.random() < st.roof) roofExtras(B, RF, pts, fl * 3.1, false, st.chantier); }
+          else { const fc = facadeOf(st), sh = wantShops(st, cx, cz); addBuilding(B, pts, fl * 3.1, fc, 0xb5ab9a, sh); buildingDetails(B, pts, fl * 3.1, fc, sh, st); if (Math.random() < st.roof) roofExtras(B, RF, pts, fl * 3.1, false, st.chantier); }
           const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
           cols.push({ pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) });
           if (st.wall && Math.random() < st.wall * 0.6) walls.push([pts, st]);
@@ -1239,6 +1247,7 @@ function buildChunk(gx, gz) {
   const tlObjs = [];
   for (const si of sl) { const s = signals[si]; tlObjs.push(makeTrafficLight(group, s)); }
   const hgrid = buildTerrain(group, gx, gz, cols, flats);
+  addServices(group, k, cols);
   flushProps(group);
   scene.add(group);
   colliders.set(k, cols);
@@ -1455,6 +1464,82 @@ function addMinaret(group, x, z, h, area) {
 }
 const tlMats = {}; // shared lamp materials by state
 for (const c of ['r', 'y', 'g']) { tlMats[c + '1'] = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: { r: 0xff2a1a, y: 0xffb000, g: 0x22ff66 }[c], emissiveIntensity: 4 }); tlMats[c + '0'] = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.4 }); }
+// ---------------- Stations-service et restaurants (OpenStreetMap, tools/services.mjs -> services.js) ----------------
+const SV = window.SERVICES || { fuel: [], resto: [] }, svGrid = new Map(), STATIONS_OSM = [];
+for (const f of SV.fuel) { const k = ckey(cellOf(f[0]), cellOf(f[1])); (svGrid.get(k) || svGrid.set(k, []).get(k)).push(['f', ...f]); }
+for (const r of SV.resto) { const k = ckey(cellOf(r[0]), cellOf(r[1])); (svGrid.get(k) || svGrid.set(k, []).get(k)).push(['r', ...r]); }
+const BRANDS = [[/total/i, '#e2001a', '#ffffff', 'TotalEnergies'], [/shell/i, '#fbce07', '#dd1d21', 'Shell'], [/oryx/i, '#e30613', '#ffffff', 'Oryx'], [/elton/i, '#0a4ea2', '#ffffff', 'Elton'],
+  [/star/i, '#d71920', '#ffffff', 'Star Oil'], [/vivo|engen/i, '#00843d', '#ffffff', 'Vivo Energy'], [/edk/i, '#00529b', '#ffcc00', 'EDK'], [/./, '#1f7a4d', '#ffffff', 'Station']];
+const svTex = new Map(); // enseigne peinte une fois par texte
+function signTex(text, bg, fg, w = 512, h = 128) {
+  const key = text + bg + fg; let t = svTex.get(key); if (t) return t;
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, w, h); g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
+  let fs = 70; g.font = `700 ${fs}px Oswald, Arial`; while (g.measureText(text).width > w - 30 && fs > 20) { fs -= 4; g.font = `700 ${fs}px Oswald, Arial`; }
+  g.fillText(text, w / 2, h / 2 + 4); t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; svTex.set(key, t); return t;
+}
+const svMat = { white: new THREE.MeshStandardMaterial({ color: 0xf2f2f0, roughness: 0.6 }), grey: new THREE.MeshStandardMaterial({ color: 0x8a8d90, roughness: 0.5, metalness: 0.4 }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x2b2d30, roughness: 0.8 }), slab: new THREE.MeshStandardMaterial({ color: 0xb9b6ae, roughness: 0.95 }), wood: new THREE.MeshStandardMaterial({ color: 0x7a5236, roughness: 0.9 }) };
+const svBox = new THREE.BoxGeometry(1, 1, 1), svCyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 12), svCone = new THREE.ConeGeometry(1, 0.6, 10);
+const svColor = new Map(); const colMat = (hex) => svColor.get(hex) || svColor.set(hex, new THREE.MeshStandardMaterial({ color: hex, roughness: 0.6 })).get(hex);
+function svPart(g, geo, mat, x, y, z, sx, sy, sz, shadow = true) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.castShadow = shadow; m.receiveShadow = true; g.add(m); return m; }
+function facingRoad(x, z) { const nr = nearestRoad(x, z, 1, r => r.t <= 8 || r.t === 10); return nr ? { nr, h: Math.atan2(nr.x - x, nr.z - z) } : null; }
+const stSpots = new Map(); // ckey -> emplacements des stations (degages de la chaussee), calcules avant les batiments
+function stationSpots(k) {
+  let a = stSpots.get(k); if (a) return a; a = [];
+  for (const [kind, x0, z0, name] of svGrid.get(k) || []) if (kind === 'f') { const q = clearOfRoads(x0, z0, 3); if (q) { const f = facingRoad(q[0], q[1]); a.push({ x: q[0], z: q[1], h: f ? f.h : 0, name }); } }
+  stSpots.set(k, a); return a;
+}
+const onStation = (k, x, z, r = 0) => stationSpots(k).some(s => Math.hypot(s.x - x, s.z - z) < 11 + r);
+function addStation(group, cols, { x, z, h, name }, k) { // dalle, auvent sur 4 piliers, 2 ilots de pompes, totem de la marque
+  const [, bg, fg, label] = BRANDS.find(b => b[0].test(name)), g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = h;
+  svPart(g, svBox, svMat.slab, 0, 0.06, 0, 16, 0.12, 12, false);
+  svPart(g, svBox, colMat(bg), 0, 5.1, 0, 12, 0.7, 8);
+  svPart(g, svBox, svMat.white, 0, 4.7, 0, 11.6, 0.12, 7.6, false);
+  for (const [a, b] of [[-4.6, -2.8], [4.6, -2.8], [-4.6, 2.8], [4.6, 2.8]]) svPart(g, svBox, svMat.white, a, 2.4, b, 0.35, 4.6, 0.35);
+  for (const a of [-2.6, 2.6]) { svPart(g, svBox, svMat.slab, a, 0.2, 0, 1.2, 0.25, 4.2, false); for (const b of [-1.1, 1.1]) { svPart(g, svBox, svMat.white, a, 1.0, b, 0.7, 1.6, 0.5); svPart(g, svBox, colMat(bg), a, 1.55, b, 0.72, 0.35, 0.52, false); } }
+  const tot = svPart(g, svBox, svMat.dark, -6.5, 3, 5.2, 0.4, 6, 0.4); tot.castShadow = true;
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.8), new THREE.MeshStandardMaterial({ map: signTex(label.toUpperCase(), bg, fg), roughness: 0.5, side: THREE.DoubleSide }));
+  sign.position.set(-6.5, 5.6, 5.45); g.add(sign);
+  svPart(g, svBox, colMat(bg), -6.5, 5.6, 5.2, 3.3, 0.9, 0.3, false);
+  // le nom de la marque sur l'auvent, cote route
+  const band = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.6), new THREE.MeshStandardMaterial({ map: signTex(label.toUpperCase(), bg, fg), roughness: 0.5 })); band.position.set(0, 5.1, 4.02); g.add(band);
+  group.add(g); STATIONS_OSM.push({ x, z, name: label, k }); // pas de collision : on roule sous l'auvent
+}
+function addServices(group, k, cols) {
+  for (const s of stationSpots(k)) addStation(group, cols, s, k);
+  for (const [kind, x0, z0, name, sorte] of svGrid.get(k) || []) {
+    if (kind === 'f') continue;
+    { // restaurant : terrasse sur le trottoir, devant la rue, avec auvent, tables et enseigne
+      const f = facingRoad(x0, z0); if (!f || f.nr.d > 40) continue; const r = f.nr.r, nx = (x0 - f.nr.x) / (f.nr.d || 1), nz = (z0 - f.nr.z) / (f.nr.d || 1);
+      const off = r.w / 2 + 0.5, x = f.nr.x + nx * off, z = f.nr.z + nz * off; // au bord du trottoir : les facades sont reculees juste derriere
+      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = Math.atan2(-nx, -nz);
+      const tones = [0xc0392b, 0x1f6fb5, 0x27ae60, 0xe67e22, 0x8e44ad], tone = tones[(Math.abs(x0 * 7 + z0 * 13) | 0) % tones.length];
+      svPart(g, svBox, colMat(tone), 0, 2.7, -1.2, 5.2, 0.12, 2.6);
+      for (const a of [-2.4, 2.4]) svPart(g, svCyl, svMat.grey, a, 1.35, 0, 0.08, 2.7, 0.08);
+      for (const a of [-1.4, 1.4]) { svPart(g, svCyl, svMat.white, a, 0.38, -0.6, 0.9, 0.06, 0.9); svPart(g, svCyl, svMat.white, a, 0.19, -0.6, 0.08, 0.38, 0.08, false);
+        for (const c of [-0.6, 0.6]) svPart(g, svBox, colMat(0xdddddd), a + c, 0.25, -0.6, 0.35, 0.05, 0.35, false); }
+      const label = name || ['RESTAURANT', 'FAST-FOOD', 'CAFÉ TOUBA'][sorte];
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 0.9), new THREE.MeshStandardMaterial({ map: signTex(label.toUpperCase(), '#' + tone.toString(16).padStart(6, '0'), '#ffffff'), roughness: 0.6, side: THREE.DoubleSide }));
+      sign.position.set(0, 3.25, 0.05); g.add(sign);
+      svPart(g, svBox, svMat.wood, 0, 3.25, -0.02, 4.7, 1.0, 0.06, false);
+      group.add(g);
+    }
+  }
+}
+// faire le plein : s'arreter sous l'auvent remplit la nitro et repare la voiture (1 500 FCFA)
+let fuelT = 0;
+function updateFuel(dt) {
+  fuelT -= dt; if (fuelT > 0 || busted) return; fuelT = 0.3;
+  for (let i = STATIONS_OSM.length - 1; i >= 0; i--) if (!chunks.has(STATIONS_OSM[i].k)) STATIONS_OSM.splice(i, 1);
+  const st = STATIONS_OSM.find(s => Math.hypot(s.x - player.x, s.z - player.z) < 7.5); if (!st) return;
+  if (Math.hypot(player.vx, player.vz) > 1.5) { if (!st.hint || time - st.hint > 8) { st.hint = time; toast(`⛽ ${st.name} : arrête-toi sous l'auvent pour faire le plein`); } return; }
+  if (nitro > 0.97 && player.hp > 97) return;
+  const prix = 1500;
+  if (typeof story !== 'undefined' && story.money < prix) { toast(`⛽ Il faut ${fmt(prix)} pour faire le plein`); fuelT = 6; return; }
+  if (typeof story !== 'undefined') { story.money -= prix; saveStory(); }
+  nitro = 1; player.hp = 100; fuelT = 10; toast(`⛽ Plein fait chez ${st.name} — voiture réparée (−${fmt(prix)})`);
+}
 function makeTrafficLight(group, s) {
   const objs = [];
   for (const [dx, dz, axisRot] of [[1, 1, 0], [-1, -1, Math.PI], [1, -1, Math.PI / 2], [-1, 1, -Math.PI / 2]]) {
@@ -2234,6 +2319,8 @@ function drawMinimap(dt, vf) {
   const toScreen = (x, z) => { const dx = x - player.x, dz = z - player.z, c = Math.cos(Math.PI + player.h), s = Math.sin(Math.PI + player.h); return [W / 2 + (dx * c - dz * s) * scale, H / 2 + (dx * s + dz * c) * scale]; };
   for (const c of cops) { const [x, y] = toScreen(c.x, c.z); mctx.fillStyle = Math.floor(time * 6) % 2 ? '#ff3030' : '#3060ff'; mctx.beginPath(); mctx.arc(clamp(x, 8, W - 8), clamp(y, 8, H - 8), 7, 0, 7); mctx.fill(); }
   drawPois(mctx, (x, z) => { const [a, b] = toScreen(x, z); return [clamp(a, 9, W - 9), clamp(b, 9, H - 9)]; }, 8);
+  for (const f of SV.fuel) { if (Math.abs(f[0] - player.x) > radius * 1.4 || Math.abs(f[1] - player.z) > radius * 1.4) continue; const [x, y] = toScreen(f[0], f[1]); if (x < 0 || y < 0 || x > W || y > H) continue;
+    mctx.fillStyle = '#ff9f1c'; mctx.beginPath(); mctx.arc(x, y, 7, 0, 7); mctx.fill(); mctx.fillStyle = '#000'; mctx.font = 'bold 10px Arial'; mctx.fillText('⛽', x - 6, y + 4); }
   if (waypoint) { const [x, y] = toScreen(waypoint[0], waypoint[1]); mctx.fillStyle = '#c86bff'; mctx.beginPath(); mctx.arc(clamp(x, 10, W - 10), clamp(y, 10, H - 10), 9, 0, 7); mctx.fill(); }
   if (wanted) { mctx.strokeStyle = Math.floor(time * 3) % 2 ? 'rgba(255,40,40,.6)' : 'rgba(40,80,255,.6)'; mctx.lineWidth = 8; mctx.strokeRect(4, 4, W - 8, H - 8); }
   // player arrow
@@ -2383,7 +2470,7 @@ function loop() {
   const vf = updatePlayer(dt);
   chunkT -= dt; if (chunkT < 0) { chunkT = 0.5; updateChunks(player.x, player.z); }
   processQueue(1);
-  updateSmoke(dt); updateNitroFx(); updateStory(dt); updateClock(dt); updateGares(); updateRadio(dt); updateDiscover(dt); updateRoute(dt); spawnTraffic(); updateTraffic(dt); updatePeds(dt); updateAnimals(dt); updateCops(dt);
+  updateSmoke(dt); updateNitroFx(); updateStory(dt); updateClock(dt); updateGares(); updateFuel(dt); updateRadio(dt); updateDiscover(dt); updateRoute(dt); spawnTraffic(); updateTraffic(dt); updatePeds(dt); updateAnimals(dt); updateCops(dt);
   updateTrafficLightVisuals(); updateCamera(dt, vf); updateGoogle3D(dt); updateHackUI(dt);
   drawMinimap(dt, vf); updateHUD(dt, vf); updateAudio(dt, vf);
   if (waterMat) waterMat.normalMap.offset.set(time * 0.01, time * 0.006);
@@ -2684,7 +2771,7 @@ function skipTravel() { // fast-forward a long regional trip
   if (lieu.length === 2 && lieu.every(Number.isFinite)) spawnAt(...ll(lieu[0], lieu[1]));
   else spawnAt(CITIES[1].p[0], CITIES[1].p[1]);
   if (url.has('cap')) player.h = THREE.MathUtils.degToRad(+url.get('cap'));
-  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, get chunks() { return chunks; } };
+  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, stations: STATIONS_OSM, get chunks() { return chunks; } };
   $('loadtxt').textContent = 'Prêt. Bienvenue à Dakar.';
   $('menubtns').style.display = 'flex'; $('start').focus();
   const go = () => { if ($('loading').style.display === 'none') return; $('loading').style.display = 'none'; document.body.classList.add('playing'); initAudio(); chapterCard();
