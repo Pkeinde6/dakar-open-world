@@ -30,6 +30,14 @@ const roads = D.roads.map(([t, ni, ow, lanes, flat, mw, ms]) => {
     const [x, z] = r.pts[i]; if (Number.isInteger(x) && Number.isInteger(z)) { const o = atV.get(vkey(x, z)); for (let k = 0; k < o.length; k += 2) if (o[k] !== ri) raise(o[k], o[k + 1], h); }
   }
 }
+const cache = process.env.OSM_CACHE || '.';
+const ZONES = [['Dakar-Plateau', 'plateau', 1500], ['Rebeuss', 'medina', 700], ['Medina', 'medina', 1100], ['Gueule Tapée', 'medina', 700], ['Fass Delorme', 'medina', 600],
+  ['Colobane', 'medina', 700], ['HLM Fass', 'sicap', 500], ['Point E', 'villa', 650], ['Fann Résidence', 'villa', 700], ['Fann', 'villa', 500], ['Fann Mermoz', 'villa', 500],
+  ['Mermoz', 'villa', 900], ['Sacré Coeur', 'villa', 800], ['Almadies', 'villa', 1600], ['Ngor', 'villa', 900], ['Mamelles', 'villa', 900], ['Ouakam', 'banlieue', 900],
+  ['Amitié', 'sicap', 700], ['Liberté', 'sicap', 1100], ['HLM', 'sicap', 800], ['Biscuiterie', 'sicap', 600], ['Castor', 'sicap', 600], ['Derklé', 'sicap', 600],
+  ['Hann Bel-Air', 'banlieue', 1200], ['Grand Yoff', 'banlieue', 1100], ['Yoff', 'medina', 1300], ["Patte d'Oie", 'sicap', 700]]
+  .map(([n, st, r]) => { const p = D.places.find(q => q[0] === n); return p && { x: p[2], z: p[3], st, r }; }).filter(Boolean);
+const styleAt = (x, z) => { let best = 'banlieue', bd = 1; for (const a of ZONES) { const d = Math.hypot(a.x - x, a.z - z) / a.r; if (d < bd) { bd = d; best = a.st; } } return best; };
 const out = { centre: [lat, lon], roads: [], buildings: [], parks: [], places: [], fuel: [], coast: [], mosques: [], schools: [], cemeteries: [], markets: [] };
 // la cote entiere (la mer est a l'ouest de cette ligne, comme dans game.js), les mosquees, ecoles, cimetieres
 for (let i = 0; i < D.coast.length; i += 2) out.coast.push([+(D.coast[i] - cx).toFixed(1), +(D.coast[i + 1] - cz).toFixed(1)]);
@@ -39,16 +47,8 @@ for (const [name, x, z, area, ...f] of L.mosquees) if (Math.hypot(x - cx, z - cz
 out.signals = []; for (let i = 0; i < D.signals.length; i += 2) if (Math.hypot(D.signals[i] - cx, D.signals[i + 1] - cz) < R) out.signals.push([+(D.signals[i] - cx).toFixed(1), +(D.signals[i + 1] - cz).toFixed(1)]); // feux tricolores OSM
 for (const [name, ...f] of L.ecoles) { const p = unflat(f); if (near(p)) out.schools.push({ name, pts: local(p) }); }
 for (const [rel, ...f] of L.cimetieres) { const p = unflat(f); if (near(p)) out.cemeteries.push(local(p)); }
-for (const r of roads) { if (r.t === 9 || !near(r.pts)) continue; out.roads.push({ t: r.t, ow: r.ow, name: r.name, w: r.w, side: r.side, bridge: r.bridge || 0, pts: local(r.pts), y: r.y && r.y.some(v => v > 0.05) ? r.y.map(v => +v.toFixed(2)) : null }); }
+for (const r of roads) { if (r.t === 9 || !near(r.pts)) continue; const mid = r.pts[r.pts.length >> 1]; out.roads.push({ style: styleAt(mid[0], mid[1]), t: r.t, ow: r.ow, name: r.name, w: r.w, side: r.side, bridge: r.bridge || 0, pts: local(r.pts), y: r.y && r.y.some(v => v > 0.05) ? r.y.map(v => +v.toFixed(2)) : null }); }
 // style de quartier, comme styleAt() dans game.js : l'ancre la plus proche (rapportee a son rayon) gagne
-const cache = process.env.OSM_CACHE || '.';
-const ZONES = [['Dakar-Plateau', 'plateau', 1500], ['Rebeuss', 'medina', 700], ['Medina', 'medina', 1100], ['Gueule Tapée', 'medina', 700], ['Fass Delorme', 'medina', 600],
-  ['Colobane', 'medina', 700], ['HLM Fass', 'sicap', 500], ['Point E', 'villa', 650], ['Fann Résidence', 'villa', 700], ['Fann', 'villa', 500], ['Fann Mermoz', 'villa', 500],
-  ['Mermoz', 'villa', 900], ['Sacré Coeur', 'villa', 800], ['Almadies', 'villa', 1600], ['Ngor', 'villa', 900], ['Mamelles', 'villa', 900], ['Ouakam', 'banlieue', 900],
-  ['Amitié', 'sicap', 700], ['Liberté', 'sicap', 1100], ['HLM', 'sicap', 800], ['Biscuiterie', 'sicap', 600], ['Castor', 'sicap', 600], ['Derklé', 'sicap', 600],
-  ['Hann Bel-Air', 'banlieue', 1200], ['Grand Yoff', 'banlieue', 1100], ['Yoff', 'medina', 1300], ["Patte d'Oie", 'sicap', 700]]
-  .map(([n, st, r]) => { const p = D.places.find(q => q[0] === n); return p && { x: p[2], z: p[3], st, r }; }).filter(Boolean);
-const styleAt = (x, z) => { let best = 'banlieue', bd = 1; for (const a of ZONES) { const d = Math.hypot(a.x - x, a.z - z) / a.r; if (d < bd) { bd = d; best = a.st; } } return best; };
 // batiments administratifs et publics OSM (ministeres, mairie, tribunal, hopitaux, hotels, bureaux), caches
 const fa = `${cache}/admin.json`;
 if (!fs.existsSync(fa)) {

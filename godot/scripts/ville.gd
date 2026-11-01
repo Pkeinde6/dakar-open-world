@@ -87,9 +87,12 @@ func flush_models() -> void:
 				var sm := mesh.surface_get_material(i)
 				if sm is StandardMaterial3D and sm.resource_name.begins_with("Facade"):
 					var f: StandardMaterial3D = sm.duplicate(); f.vertex_color_use_as_albedo = true; mesh.surface_set_material(i, f)
-			var cells := {} # un groupe par carre de 200 m : chacun se cache au loin, et la zone visible reste juste
+			# voitures et petits objets tres detailles (20 000 a 40 000 triangles) : seulement de pres, par carres de 70 m
+			var heavy: bool = CARS.has(name) or name in ["cafe", "fruitcart", "maisonbasket"]
+			var cs: float = 70.0 if heavy else 200.0
+			var cells := {} # un groupe par carre : chacun se cache au loin, et la zone visible reste juste
 			for k in placed[name].size():
-				var o: Vector3 = placed[name][k][0].origin; var key := Vector2i(floori(o.x / 200.0), floori(o.z / 200.0))
+				var o: Vector3 = placed[name][k][0].origin; var key := Vector2i(floori(o.x / cs), floori(o.z / cs))
 				if not cells.has(key): cells[key] = []
 				cells[key].append(k)
 			for key in cells:
@@ -97,8 +100,8 @@ func flush_models() -> void:
 				var mm := MultiMesh.new(); mm.transform_format = MultiMesh.TRANSFORM_3D; mm.use_colors = true; mm.mesh = mesh; mm.instance_count = ids.size()
 				for j in ids.size():
 					mm.set_instance_transform(j, placed[name][ids[j]][0] * md.norm * pair[1]); mm.set_instance_color(j, placed[name][ids[j]][1])
-				mm.custom_aabb = AABB(Vector3(key.x * 200.0 - 30, -5, key.y * 200.0 - 30), Vector3(260, 80, 260))
-				var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.visibility_range_end = 450.0; m.add_child(mi)
+				mm.custom_aabb = AABB(Vector3(key.x * cs - 30, -5, key.y * cs - 30), Vector3(cs + 60, 80, cs + 60))
+				var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.visibility_range_end = 130.0 if heavy else 380.0; m.add_child(mi)
 
 # oriented box of a footprint: the edge direction giving the smallest rectangle
 func obb(pts: PackedVector2Array) -> Dictionary:
@@ -162,7 +165,9 @@ func building_look(i: int, b: Dictionary, pts: PackedVector2Array) -> Dictionary
 	var h2: float = b.h if b.h > 0 else 3.1 * maxf(1.0, floorf(rng.randf_range(st.h[0], st.h[1])))
 	if b.h == 0 and pts.size() == 4 and rng.randf() < 0.6: # maison type du quartier, modelisee dans Blender
 		var names: Array = st.houses
-		if fit(names[rng.randi() % names.size()], pts, col): return {"skip": true}
+		if fit(names[rng.randi() % names.size()], pts, col):
+			if b.get("style", "") != "plateau" and rng.randf() < 0.6: compounds.append(pts)
+			return {"skip": true}
 	return {"h": h2, "col": col}
 
 var _flagmat: StandardMaterial3D
@@ -373,3 +378,100 @@ func tick_lights(t: float) -> void:
 	if tl_mats.is_empty(): return
 	var ph := fmod(t, 30.0); var on := "g" if ph < 12 else ("y" if ph < 15 else "r")
 	for c in tl_mats: tl_mats[c].emission_energy_multiplier = 3.0 if c == on else 0.0
+
+# ---------------------------------------------------------------- vie de rue : voitures garees, kiosques, toits, murs de concession
+const CARS := {"taxisn": 4.3, "peugeot405": 4.4, "clando": 4.4, "mercedes": 4.5, "carrapide": 5.8, "ndiaga": 7.0}
+var roofs := [] # [centre Vector2, hauteur] des toits-terrasses (rempli par main.gd)
+var compounds := [] # empreintes des maisons qui recoivent un mur de cloture
+
+func _car_xf(name: String, p: Vector2, heading: float) -> Transform3D: # modele a sa vraie longueur, axe long sur la rue
+	var S: Vector3 = model(name).size; var k: float = CARS[name] / maxf(S.x, S.z)
+	var rot := heading + (PI / 2.0 if S.x > S.z else 0.0)
+	return Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3(k, k, k)), Vector3(p.x, 0.05, p.y))
+
+func street_life() -> void:
+	var weights := ["taxisn", "taxisn", "taxisn", "peugeot405", "clando", "clando", "mercedes", "carrapide", "ndiaga"]
+	var props := ["kiosque_om", "kiosque_om", "cafe", "fruitcart"]
+	for r in data.roads:
+		if r.t < 3 or r.t > 7 or r.y != null: continue
+		var acc := rng.randf_range(4, 12)
+		for i in r.pts.size() - 1:
+			var a := Vector2(r.pts[i][0], r.pts[i][1]); var b := Vector2(r.pts[i + 1][0], r.pts[i + 1][1]); var L := a.distance_to(b)
+			if L < 0.5: continue
+			var d := (b - a) / L; var n := Vector2(-d.y, d.x); var s := acc
+			while s < L:
+				var side := 1.0 if rng.randf() < 0.5 else -1.0; var roll := rng.randf()
+				if roll < 0.16 and r.t >= 4: # voiture garee le long du trottoir
+					var p: Vector2 = a + d * s + n * side * (r.w / 2.0 - 1.1)
+					if not on_road(p, 1.0, r):
+						var name: String = weights[rng.randi() % weights.size()]
+						var xf := _car_xf(name, p, atan2(d.x, d.y) + (0.0 if rng.randf() < 0.5 else PI))
+						if not placed.has(name): placed[name] = []
+						placed[name].append([xf, Color.WHITE])
+				elif roll < 0.21: # kiosque Orange Money, cafe Touba, charrette de fruits sur le trottoir
+					var p2: Vector2 = a + d * s + n * side * (r.w / 2.0 + r.side * 0.6 + 0.6)
+					if m._free(p2.x, p2.y) and not on_road(p2, 0.5, r):
+						var pn: String = props[rng.randi() % props.size()]; var S: Vector3 = model(pn).size; var k := 2.6 / maxf(S.x, S.z)
+						place(pn, p2.x, p2.y, atan2(-n.x * side, -n.y * side), k, k, k, Color.WHITE); m._take(p2.x, p2.y, 2)
+				s += rng.randf_range(7, 15)
+			acc = s - L
+	# toits : citernes noires (Polytank), paraboles
+	var tank := CylinderMesh.new(); tank.top_radius = 0.55; tank.bottom_radius = 0.5; tank.height = 1.25
+	var dish := SphereMesh.new(); dish.radius = 0.42; dish.height = 0.3
+	var tx := []; var dx := []
+	for rf in roofs:
+		var c: Vector2 = rf[0]; var h: float = rf[1]
+		tx.append(Transform3D(Basis(), Vector3(c.x + rng.randf_range(-2, 2), h + 0.62, c.y + rng.randf_range(-2, 2))))
+		if rng.randf() < 0.5: dx.append(Transform3D(Basis(Vector3.RIGHT, -1.0), Vector3(c.x + 2.5, h + 0.9, c.y - 1.5)))
+	_multi(tank, m._plain(Color(0.11, 0.11, 0.12), 0.6), tx); _multi(dish, m._plain(Color(0.85, 0.85, 0.85), 0.4), dx)
+	# murs de cloture autour des maisons de quartier, portail du cote de la rue
+	var wall := SurfaceTool.new(); wall.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for pts in compounds:
+		var o := obb(pts)
+		if o.is_empty(): continue
+		var hu: float = o.a / 2.0 + 1.8; var hv: float = o.b / 2.0 + 1.8
+		var cs := [o.c + o.u * -hu + o.v * -hv, o.c + o.u * hu + o.v * -hv, o.c + o.u * hu + o.v * hv, o.c + o.u * -hu + o.v * hv]
+		var gate := 0; var gd := 1e9
+		for i in 4:
+			var nr := nearest((cs[i] + cs[(i + 1) % 4]) / 2.0)
+			if not nr.is_empty() and nr.d < gd: gd = nr.d; gate = i
+		for i in 4:
+			var a: Vector2 = cs[i]; var b: Vector2 = cs[(i + 1) % 4]
+			var parts := [[a, b]] if i != gate else [[a, a.lerp(b, 0.4)], [a.lerp(b, 0.6), b]]
+			for pr in parts:
+				var p0: Vector2 = pr[0]; var p1: Vector2 = pr[1]
+				if on_road((p0 + p1) / 2.0, 0.2): continue
+				for v in [[p0, 0.0], [p1, 0.0], [p1, 2.2], [p0, 0.0], [p1, 2.2], [p0, 2.2], [p0, 0.0], [p1, 2.2], [p1, 0.0], [p0, 0.0], [p0, 2.2], [p1, 2.2]]: wall.add_vertex(Vector3(v[0].x, v[1], v[0].y))
+	wall.generate_normals()
+	var wmi := MeshInstance3D.new(); wmi.mesh = wall.commit(); wmi.material_override = m._mat("res://textures/worn_plaster_wall_diff.jpg", Color(1.05, 1.0, 0.92), 3.0); m.add_child(wmi)
+
+# ---------------------------------------------------------------- remplissage : OSM n'a pas tous les batiments de Dakar.
+# Comme la version web, on construit des maisons du quartier le long des rues la ou le terrain est libre.
+func infill() -> void:
+	var n := 0
+	for r in data.roads:
+		if r.t < 2 or r.t > 7 or r.y != null: continue
+		var st: Dictionary = STYLES.get(r.get("style", "banlieue"), STYLES.banlieue)
+		var acc := rng.randf_range(2, 6)
+		for i in r.pts.size() - 1:
+			var a := Vector2(r.pts[i][0], r.pts[i][1]); var b := Vector2(r.pts[i + 1][0], r.pts[i + 1][1]); var L := a.distance_to(b)
+			if L < 4: continue
+			var d := (b - a) / L; var nn := Vector2(-d.y, d.x); var s := acc
+			while s < L - 3:
+				for side in [-1.0, 1.0]:
+					if rng.randf() < 0.15: continue # une parcelle vide de temps en temps
+					var name: String = st.houses[rng.randi() % st.houses.size()]; var S: Vector3 = model(name).size
+					var depth := S.z; var off: float = r.w / 2.0 + r.side + 1.0 + depth / 2.0
+					var c: Vector2 = a + d * s + nn * side * off
+					var ok := true
+					for corner in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1), Vector2.ZERO]:
+						var q: Vector2 = c + d * corner.x * S.x / 2.0 + nn * corner.y * depth / 2.0
+						if not m._free(q.x, q.y) or on_road(q, 0.8): ok = false; break
+					if not ok: continue
+					var rot := atan2(-nn.x * side, -nn.y * side) # facade vers la rue
+					place(name, c.x, c.y, rot, 1, 1, 1, Color(st.pal[rng.randi() % st.pal.size()])); m._take(c.x, c.y, maxf(S.x, depth) / 2.0 + 0.5); n += 1
+					if r.get("style", "") != "plateau" and rng.randf() < 0.4:
+						compounds.append(PackedVector2Array([c + d * -S.x / 2.0 + nn * -depth / 2.0, c + d * S.x / 2.0 + nn * -depth / 2.0, c + d * S.x / 2.0 + nn * depth / 2.0, c + d * -S.x / 2.0 + nn * depth / 2.0]))
+				s += rng.randf_range(11, 15)
+			acc = s - L
+	print("maisons ajoutees le long des rues : ", n)

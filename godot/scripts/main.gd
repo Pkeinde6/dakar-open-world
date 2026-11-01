@@ -46,6 +46,8 @@ func _ready() -> void:
 	_fuel_stations()
 	_billboards()
 	ville.furniture()
+	ville.street_life()
+	ville.infill()
 	_greenery()
 	ville.flush_models()
 	car = preload("res://scripts/car.gd").new(); add_child(car); car.setup("res://models/corolla_roues.glb", Color("f2c200"))
@@ -227,6 +229,10 @@ func _buildings() -> void:
 		if not cells.has(key):
 			var nst := SurfaceTool.new(); nst.begin(Mesh.PRIMITIVE_TRIANGLES); cells[key] = nst
 		var st: SurfaceTool = cells[key]; st.set_color(col)
+		if not b.mosque and b.get("use", "") == "" and rng.randf() < 0.45:
+			var cc := Vector2.ZERO
+			for p in pts: cc += p
+			ville.roofs.append([cc / pts.size(), h])
 		var cw := _area(pts) > 0
 		for i in pts.size():
 			var a := pts[i]; var c := pts[(i + 1) % pts.size()]
