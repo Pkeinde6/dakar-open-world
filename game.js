@@ -175,6 +175,14 @@ function roadOverlap(x, z, margin = 0.4) {
   }
   return worst > 0 ? { o: worst, px, pz } : null;
 }
+// un batiment pose sur le couloir du BRT (souvent les abris de la ligne pris pour un toit par Google Open Buildings)
+function onBRT(pts) {
+  const L = window.BRT && window.BRT.line; if (!L) return false; let cx = 0, cz = 0; for (const p of pts) { cx += p[0]; cz += p[1]; } cx /= pts.length; cz /= pts.length;
+  for (let i = 0; i < L.length - 1; i++) { const [ax, az] = L[i], [bx, bz] = L[i + 1]; if (Math.abs(ax - cx) > 120 || Math.abs(az - cz) > 120) continue;
+    if (inPoly(ax, az, pts)) return true; const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
+    for (const [x, z] of pts) { const t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1); if (Math.hypot(x - ax - dx * t, z - az - dz * t) < 5) return true; } }
+  return false;
+}
 // un batiment que l'axe d'une rue traverse barre la rue : on l'abandonne (meme regle que Godot, quartier.gd)
 function crossedByRoad(pts) {
   let cx = 0, cz = 0; for (const p of pts) { cx += p[0]; cz += p[1]; } cx /= pts.length; cz /= pts.length;
@@ -1030,7 +1038,7 @@ function buildChunk(gx, gz) {
     if (kind !== 1) { // OSM footprints and road widths disagree: pull walls back behind the sidewalk
       let moved = 0;
       for (const q of pts) for (let it = 0; it < 3; it++) { const ov = roadOverlap(q[0], q[1]); if (!ov) break; if (ov.o > 6) { moved = -1e9; break; } q[0] += ov.px * ov.o; q[1] += ov.pz * ov.o; moved++; }
-      if (moved < 0 || crossedByRoad(pts)) continue;
+      if (moved < 0 || crossedByRoad(pts) || onBRT(pts)) continue;
       let ar = 0; for (let i = 0; i < pts.length; i++) { const [x1, z1] = pts[i], [x2, z2] = pts[(i + 1) % pts.length]; ar += x1 * z2 - x2 * z1; } if (Math.abs(ar) < 12) continue;
     }
     const st = styleAt(x, z), bcx = pts.reduce((a, p) => a + p[0], 0) / pts.length, bcz = pts.reduce((a, p) => a + p[1], 0) / pts.length;
@@ -1280,6 +1288,7 @@ function buildChunk(gx, gz) {
   for (const si of sl) { const s = signals[si]; tlObjs.push(makeTrafficLight(group, s)); }
   const hgrid = buildTerrain(group, gx, gz, cols, flats);
   addServices(group, k, cols);
+  addBRT(group, k);
   flushProps(group);
   scene.add(group);
   colliders.set(k, cols);
@@ -1557,6 +1566,72 @@ function addServices(group, k, cols) {
       svPart(g, svBox, svMat.wood, 0, 3.25, -0.02, 4.7, 1.0, 0.06, false);
       group.add(g);
     }
+  }
+}
+// ---------------- BRT de Dakar (ligne B1 Petersen <-> Prefecture de Guediawaye, tools/brt.mjs -> brt.js) ----------------
+const BRT = window.BRT || { line: [], stops: [] }, brtCum = [0];
+for (let i = 1; i < BRT.line.length; i++) brtCum.push(brtCum[i - 1] + Math.hypot(BRT.line[i][0] - BRT.line[i - 1][0], BRT.line[i][1] - BRT.line[i - 1][1]));
+const brtLen = brtCum[brtCum.length - 1] || 0, brtSegs = new Map();
+for (let i = 0; i < BRT.line.length - 1; i++) { const k = ckey(cellOf((BRT.line[i][0] + BRT.line[i + 1][0]) / 2), cellOf((BRT.line[i][1] + BRT.line[i + 1][1]) / 2)); (brtSegs.get(k) || brtSegs.set(k, []).get(k)).push(i); }
+function brtAt(sv) { // position et cap sur la ligne a la distance sv
+  sv = clamp(sv, 0, brtLen); let lo = 0, hi = brtCum.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (brtCum[m] <= sv) lo = m; else hi = m; }
+  const [ax, az] = BRT.line[lo], [bx, bz] = BRT.line[hi], u = (sv - brtCum[lo]) / ((brtCum[hi] - brtCum[lo]) || 1);
+  return { x: ax + (bx - ax) * u, z: az + (bz - az) * u, h: Math.atan2(bx - ax, bz - az) };
+}
+function brtProject(x, z) { let best = 0, bd = 1e9; for (let i = 0; i < BRT.line.length; i++) { const d = Math.hypot(BRT.line[i][0] - x, BRT.line[i][1] - z); if (d < bd) { bd = d; best = i; } } return brtCum[best]; }
+// une station par nom (les quais des deux sens), placee sur la ligne
+const brtStations = (() => { const by = new Map(); for (const [x, z, n] of BRT.stops) { const k = n || `${Math.round(x / 150)},${Math.round(z / 150)}`; const e = by.get(k) || by.set(k, { n, x: 0, z: 0, c: 0 }).get(k); e.x += x; e.z += z; e.c++; }
+  return [...by.values()].map(e => ({ n: e.n, s: brtProject(e.x / e.c, e.z / e.c) })).sort((a, b) => a.s - b.s); })();
+const brtStGrid = new Map(); for (const st of brtStations) { const p = brtAt(st.s); st.x = p.x; st.z = p.z; st.h = p.h; const k = ckey(cellOf(p.x), cellOf(p.z)); (brtStGrid.get(k) || brtStGrid.set(k, []).get(k)).push(st); }
+const brtLaneMat = new THREE.MeshStandardMaterial({ color: 0x6f6c69, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+const brtEdgeMat = new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.7, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+const brtGlass = new THREE.MeshStandardMaterial({ color: 0x9fc6d6, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.45 });
+function addBRT(group, k) {
+  const ids = brtSegs.get(k); if (ids) { // voie reservee : bande de beton de 7 m bordee de jaune
+    const lane = [], edge = [], hw = 3.5, y = 0.33;
+    for (const i of ids) { const [ax, az] = BRT.line[i], [bx, bz] = BRT.line[i + 1], L = Math.hypot(bx - ax, bz - az) || 1, nx = -(bz - az) / L, nz = (bx - ax) / L;
+      const quad = (arr, o0, o1, yy) => arr.push(ax + nx * o0, yy, az + nz * o0, bx + nx * o0, yy, bz + nz * o0, bx + nx * o1, yy, bz + nz * o1, ax + nx * o0, yy, az + nz * o0, bx + nx * o1, yy, bz + nz * o1, ax + nx * o1, yy, az + nz * o1);
+      quad(lane, -hw, hw, y); quad(edge, hw - 0.5, hw - 0.15, y + 0.01); quad(edge, -hw + 0.15, -hw + 0.5, y + 0.01); }
+    for (const [arr, mat] of [[lane, brtLaneMat], [edge, brtEdgeMat]]) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3)); g.computeVertexNormals();
+      const nrm = g.attributes.normal; for (let i = 0; i < nrm.count; i++) nrm.setXYZ(i, 0, 1, 0); const m = new THREE.Mesh(g, mat); m.receiveShadow = true; group.add(m); }
+    // « BRT » peint tous les 120 m
+    for (const i of ids) if (Math.floor(brtCum[i] / 120) !== Math.floor(brtCum[i + 1] / 120)) { const p = brtAt(Math.ceil(brtCum[i] / 120) * 120);
+      const t = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.3), new THREE.MeshStandardMaterial({ map: signTex('BRT', '#6f6c69', '#ffffff', 256, 128), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+      t.rotation.set(-Math.PI / 2, 0, -p.h + Math.PI); t.position.set(p.x, 0.35, p.z); group.add(t); }
+  }
+  for (const st of brtStGrid.get(k) || []) { // station : quai sureleve, abri vitre, nom
+    const g = new THREE.Group(); g.position.set(st.x, 0, st.z); g.rotation.y = st.h;
+    svPart(g, svBox, svMat.slab, 5.2, 0.45, 0, 3, 0.9, 30, false);
+    svPart(g, svBox, svMat.white, 5.8, 3.6, 0, 3.6, 0.2, 24);
+    for (const b of [-11, -5.5, 0, 5.5, 11]) svPart(g, svBox, svMat.grey, 6.6, 2.2, b, 0.15, 2.7, 0.15);
+    svPart(g, svBox, brtGlass, 6.7, 2.1, 0, 0.06, 2.2, 23, false);
+    const nm = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.8), new THREE.MeshStandardMaterial({ map: signTex(`BRT · ${(st.n || 'Station').toUpperCase()}`, '#0a4ea2', '#ffffff', 768, 112), roughness: 0.5, side: THREE.DoubleSide }));
+    nm.position.set(4.1, 3.3, 0); nm.rotation.y = -Math.PI / 2; g.add(nm);
+    group.add(g);
+  }
+}
+// bus articules electriques : ils font l'aller-retour et marquent l'arret a chaque station
+const brtBuses = [];
+function makeBrtBus() {
+  const g = new THREE.Group(), white = colMat(0xf4f6f8), blue = colMat(0x0a4ea2), glass = colMat(0x1d2a33);
+  for (const zc of [4.6, -4.6]) { svPart(g, svBox, white, 0, 1.75, zc, 2.55, 2.6, 8.8); svPart(g, svBox, blue, 0, 0.75, zc, 2.57, 0.6, 8.82, false);
+    svPart(g, svBox, glass, 0, 2.15, zc, 2.6, 1.0, 8.2, false); for (const wz of [-2.8, 2.8]) svPart(g, svCyl, svMat.dark, 0, 0.5, zc + wz, 1.0, 2.6, 1.0, false).rotation.z = Math.PI / 2; }
+  svPart(g, svBox, svMat.dark, 0, 1.6, 0, 2.3, 2.4, 0.6, false);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(2, 0.35), new THREE.MeshStandardMaterial({ map: signTex('B1 PETERSEN', '#111111', '#ffb000', 512, 96) })); sign.position.set(0, 2.85, 9.02); g.add(sign);
+  scene.add(g); return g;
+}
+function updateBRT(dt) {
+  if (!brtLen) return;
+  if (!brtBuses.length) for (let i = 0; i < 6; i++) brtBuses.push({ s: brtLen * (i + 0.5) / 6, dir: i % 2 ? 1 : -1, wait: 0, g: null });
+  for (const b of brtBuses) {
+    if (b.wait > 0) b.wait -= dt;
+    else { const next = brtStations.find(st => b.dir > 0 ? st.s > b.s + 0.5 : false) || (b.dir < 0 ? [...brtStations].reverse().find(st => st.s < b.s - 0.5) : null);
+      const v = next && Math.abs(next.s - b.s) < 40 ? Math.max(2, Math.abs(next.s - b.s) * 0.35) : 14; // freine avant la station
+      const ns = b.s + b.dir * v * dt;
+      if (next && (b.dir > 0 ? ns >= next.s : ns <= next.s)) { b.s = next.s; b.wait = 12; } else b.s = ns;
+      if (b.s >= brtLen || b.s <= 0) { b.s = clamp(b.s, 0, brtLen); b.dir *= -1; b.wait = 20; } }
+    const p = brtAt(b.s), near = Math.hypot(p.x - player.x, p.z - player.z) < 700;
+    if (near && !b.g) b.g = makeBrtBus(); if (b.g) { b.g.visible = near; b.g.position.set(p.x, 0.33, p.z); b.g.rotation.y = p.h + (b.dir < 0 ? Math.PI : 0); }
   }
 }
 // faire le plein : s'arreter sous l'auvent remplit la nitro et repare la voiture (1 500 FCFA)
@@ -2351,6 +2426,9 @@ function drawMinimap(dt, vf) {
   const toScreen = (x, z) => { const dx = x - player.x, dz = z - player.z, c = Math.cos(Math.PI + player.h), s = Math.sin(Math.PI + player.h); return [W / 2 + (dx * c - dz * s) * scale, H / 2 + (dx * s + dz * c) * scale]; };
   for (const c of cops) { const [x, y] = toScreen(c.x, c.z); mctx.fillStyle = Math.floor(time * 6) % 2 ? '#ff3030' : '#3060ff'; mctx.beginPath(); mctx.arc(clamp(x, 8, W - 8), clamp(y, 8, H - 8), 7, 0, 7); mctx.fill(); }
   drawPois(mctx, (x, z) => { const [a, b] = toScreen(x, z); return [clamp(a, 9, W - 9), clamp(b, 9, H - 9)]; }, 8);
+  if (BRT.line.length) { mctx.strokeStyle = 'rgba(40,120,255,.9)'; mctx.lineWidth = 4; mctx.beginPath(); let on = false;
+    for (let i = 0; i < BRT.line.length; i += 2) { const q = BRT.line[i]; if (Math.abs(q[0] - player.x) > radius * 1.6 || Math.abs(q[1] - player.z) > radius * 1.6) { on = false; continue; } const [x, y] = toScreen(q[0], q[1]); if (on) mctx.lineTo(x, y); else mctx.moveTo(x, y); on = true; }
+    mctx.stroke(); }
   for (const f of SV.fuel) { if (Math.abs(f[0] - player.x) > radius * 1.4 || Math.abs(f[1] - player.z) > radius * 1.4) continue; const [x, y] = toScreen(f[0], f[1]); if (x < 0 || y < 0 || x > W || y > H) continue;
     mctx.fillStyle = '#ff9f1c'; mctx.beginPath(); mctx.arc(x, y, 7, 0, 7); mctx.fill(); mctx.fillStyle = '#000'; mctx.font = 'bold 10px Arial'; mctx.fillText('⛽', x - 6, y + 4); }
   if (waypoint) { const [x, y] = toScreen(waypoint[0], waypoint[1]); mctx.fillStyle = '#c86bff'; mctx.beginPath(); mctx.arc(clamp(x, 10, W - 10), clamp(y, 10, H - 10), 9, 0, 7); mctx.fill(); }
@@ -2502,7 +2580,7 @@ function loop() {
   const vf = updatePlayer(dt);
   chunkT -= dt; if (chunkT < 0) { chunkT = 0.5; updateChunks(player.x, player.z); }
   processQueue(1);
-  updateSmoke(dt); updateNitroFx(); updateStory(dt); updateClock(dt); updateGares(); updateFuel(dt); updateRadio(dt); updateDiscover(dt); updateRoute(dt); spawnTraffic(); updateTraffic(dt); updatePeds(dt); updateAnimals(dt); updateCops(dt);
+  updateSmoke(dt); updateNitroFx(); updateStory(dt); updateClock(dt); updateGares(); updateFuel(dt); updateBRT(dt); updateRadio(dt); updateDiscover(dt); updateRoute(dt); spawnTraffic(); updateTraffic(dt); updatePeds(dt); updateAnimals(dt); updateCops(dt);
   updateTrafficLightVisuals(); updateCamera(dt, vf); updateGoogle3D(dt); updateHackUI(dt);
   drawMinimap(dt, vf); updateHUD(dt, vf); updateAudio(dt, vf);
   if (waterMat) waterMat.normalMap.offset.set(time * 0.01, time * 0.006);
@@ -2804,7 +2882,7 @@ function skipTravel() { // fast-forward a long regional trip
   if (lieu.length === 2 && lieu.every(Number.isFinite)) spawnAt(...ll(lieu[0], lieu[1]));
   else spawnAt(CITIES[1].p[0], CITIES[1].p[1]);
   if (url.has('cap')) player.h = THREE.MathUtils.degToRad(+url.get('cap'));
-  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, stations: STATIONS_OSM, elevAt, roads, get chunks() { return chunks; } };
+  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, stations: STATIONS_OSM, elevAt, roads, brtBuses, brtStations, get chunks() { return chunks; } };
   $('loadtxt').textContent = 'Prêt. Bienvenue à Dakar.';
   $('menubtns').style.display = 'flex'; $('start').focus();
   const go = () => { if ($('loading').style.display === 'none') return; $('loading').style.display = 'none'; document.body.classList.add('playing'); initAudio(); chapterCard();
