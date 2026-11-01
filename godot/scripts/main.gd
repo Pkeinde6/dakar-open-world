@@ -91,7 +91,11 @@ func _make(k: String, slow := false) -> Node3D: # construit la tuile k ; slow : 
 	return q
 
 func _load_now(k: String) -> void:
-	if known.has(k): _attach(await _make(k))
+	if not known.has(k): return
+	var cuit := "res://cuit/%s.scn" % k
+	if ResourceLoader.exists(cuit): # tuile du depart pre-construite : chargee tout de suite
+		var q: Node3D = (load(cuit) as PackedScene).instantiate(); q.key = k; q.set_meta("data", _read(k)); _attach(q)
+	else: _attach(await _make(k))
 
 func _attach(q: Node3D) -> void:
 	add_child(q); tiles[q.key] = q; pending.erase(q.key); building = false
@@ -136,7 +140,7 @@ func _poll_loads() -> void: # tuiles pre-construites dont le chargement est fini
 		var st := ResourceLoader.load_threaded_get_status(loading[k])
 		if st == ResourceLoader.THREAD_LOAD_IN_PROGRESS: continue
 		var path: String = loading[k]; loading.erase(k)
-		if st != ResourceLoader.THREAD_LOAD_LOADED: building = false; pending.erase(k); continue
+		if st != ResourceLoader.THREAD_LOAD_LOADED: print("tuile %s : chargement rate (%d)" % [k, st]); building = false; pending.erase(k); continue
 		var q: Node3D = (ResourceLoader.load_threaded_get(path) as PackedScene).instantiate()
 		q.key = k; q.set_meta("data", _read(k)); _attach(q)
 
@@ -185,7 +189,7 @@ func _spawn_point(near: Vector2) -> Transform3D:
 			var p := Vector2(r.pts[i][0], r.pts[i][1]); var d := p.distance_to(near)
 			if d < bd:
 				bd = d; var q := Vector2(r.pts[i + 1][0], r.pts[i + 1][1]); var dir := (q - p).normalized(); var n := Vector2(-dir.y, dir.x)
-				var c: Vector2 = p.lerp(q, 0.5) + n * (r.w / 4.0)
+				var c: Vector2 = p.lerp(q, 0.5) + n * (r.w / 2.0 - 1.2) # garee le long du trottoir, pas en travers de la voie
 				best = Transform3D(Basis(Vector3.UP, atan2(dir.x, dir.y)), Vector3(c.x, 0, c.y))
 	return best
 
@@ -245,9 +249,9 @@ func _process(dt: float) -> void:
 	hint_box.visible = hint.text != "" and not carte.visible
 	_auto_quality(dt)
 	if capture != "": # image quand les 9 tuiles proches sont la (ou au bout de 3 min)
-		if ready_frames < 0 and (tiles.size() >= 9 or frames > 9000): ready_frames = frames
+		if ready_frames < 0 and ((pending.is_empty() and loading.is_empty() and not building and frames > 30) or frames > 9000): ready_frames = frames # toutes les tuiles existantes autour sont posees (pres de la mer il y en a moins de 9)
 		if ready_frames >= 0 and frames == ready_frames + 60:
-			print("tuiles ", tiles.size(), " FPS ", Engine.get_frames_per_second(), " temps ", Time.get_ticks_msec() / 1000)
+			print("tuiles ", tiles.size(), " FPS ", Engine.get_frames_per_second(), " pret en ", Time.get_ticks_msec() / 1000, " s")
 			get_viewport().get_texture().get_image().save_png(capture); get_tree().quit()
 
 # le jeu s'adapte a l'ordinateur : moyenne sur 3 s, on baisse sous 28 images/s, on remonte au-dessus de 50

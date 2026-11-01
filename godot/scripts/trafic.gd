@@ -126,12 +126,13 @@ func _physics_process(dt: float) -> void:
 		var cur := _at(r, c.s); var p: Vector2 = cur[0]; var d: Vector2 = cur[1] * c.dir
 		# vitesse voulue : limite du type, freinage derriere une voiture, au feu rouge, devant le joueur
 		var want: float = c.vmax * (1.3 if r.t <= 1 else 1.0)
-		for o in cars + cops:
+		var lane0: float = r.w / 4.0 if not r.ow else 0.0; var me := p + Vector2(-d.y, d.x) * lane0 # le centre de ma voie
+		for o in cars + cops: # on ne freine que pour ce qui est devant, dans ma voie (pas sur l'autre voie ni garee au bord)
 			if o == c or not o.body.visible: continue
-			var q: Vector2 = Vector2(o.pos.x, o.pos.z) - p
-			if q.length() < 14 and q.normalized().dot(d) > 0.85: want = minf(want, maxf(0, (q.length() - c.len - 2.0) * 1.2))
-		var qp := Vector2(ppos.x, ppos.z) - p
-		if qp.length() < 14 and qp.normalized().dot(d) > 0.85: want = minf(want, maxf(0, (qp.length() - 6.0) * 1.0))
+			var q: Vector2 = Vector2(o.pos.x, o.pos.z) - me; var ahead := q.dot(d); var side := absf(q.dot(Vector2(-d.y, d.x)))
+			if ahead > 0 and ahead < 16 and side < 1.6: want = minf(want, maxf(0, (ahead - c.len - 2.0) * 1.2))
+		var qp := Vector2(ppos.x, ppos.z) - me; var pa := qp.dot(d); var ps := absf(qp.dot(Vector2(-d.y, d.x)))
+		if pa > 0 and pa < 16 and ps < 1.8: want = minf(want, maxf(0, (pa - 6.0) * 1.0))
 		if _red_ahead(p, d): want = 0.0
 		c.v = move_toward(c.v, want, (8.0 if want < c.v else 3.0) * dt)
 		c.s += c.v * c.dir * dt
