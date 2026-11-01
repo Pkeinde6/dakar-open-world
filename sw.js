@@ -30,7 +30,7 @@ self.addEventListener('fetch', e => {
   const u = new URL(req.url);
   const same = u.origin === location.origin;
   if (!same && !/^(cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com)$/.test(u.host)) return; // Google 3D et le reste : en ligne seulement
-  if (same && u.pathname.endsWith('/cle-google.js')) return;
+  if (same && (u.pathname.endsWith('/cle-google.js') || u.pathname.includes('/batiments/paquets/'))) return; // les paquets sont defaits en carres par la page
   const fresh = same && (u.pathname.endsWith('/') || /\.(html|js|webmanifest)$/.test(u.pathname));
   e.respondWith(fresh ? fromNet(req) : fromCache(req));
 });

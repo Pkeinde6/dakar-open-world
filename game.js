@@ -2810,25 +2810,31 @@ function offlineLabel() {
   let ok = null; try { ok = localStorage.getItem(OFF_KEY); } catch (e) { }
   $('offline').textContent = ok ? 'Hors ligne : mettre à jour' : 'Jouer hors ligne';
   $('offtxt').textContent = !navigator.onLine ? 'Pas de réseau : tu joues avec Dakar gardé sur l’appareil.'
-    : ok ? `Dakar est gardé sur l’appareil (${new Date(+ok).toLocaleDateString('fr')}).` : 'Télécharge Dakar une fois (≈ 150 Mo) pour jouer sans réseau.';
+    : ok ? `Dakar est gardé sur l’appareil (${new Date(+ok).toLocaleDateString('fr')}).` : 'Télécharge Dakar une fois (≈ 130 Mo) pour jouer sans réseau.';
 }
 async function downloadOffline() {
-  const btn = $('offline'); if (btn.disabled || !('caches' in window)) return; btn.disabled = true;
+  const btn = $('offline'); if (btn.disabled || !('caches' in window)) return; btn.disabled = true; let fail0 = false;
   try { await navigator.storage?.persist?.(); } catch (e) { } // pour que le telephone ne vide pas le cache
   const abs = (u) => new URL(u, location.href).href;
   // tout ce que le jeu a deja charge (modeles, textures, bibliotheques), les ciels des autres ambiances et tous les carres de batiments
-  const urls = new Set(performance.getEntriesByType('resource').map(e => e.name).filter(u => /^https?:/.test(u) && !/cle-google|tile\.googleapis|\/sw\.js/.test(u)));
-  ['./', 'index.html', 'manifest.webmanifest', 'icones/icone-180.png', 'icones/icone-192.png', 'icones/icone-512.png', 'textures/menu.jpg', 'batiments/liste.json'].forEach(u => urls.add(abs(u)));
+  // seulement les fichiers du jeu : pas les flux des radios en direct (sans fin) ni leurs annuaires
+  const mine = u => { try { const h = new URL(u).host; return h === location.host || /^(cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com)$/.test(h); } catch (e) { return false; } };
+  const urls = new Set(performance.getEntriesByType('resource').map(e => e.name).filter(u => mine(u) && !/cle-google|\/sw\.js|\/batiments\//.test(u)));
+  ['./', 'index.html', 'manifest.webmanifest', 'icones/icone-180.png', 'icones/icone-192.png', 'icones/icone-512.png', 'textures/menu.jpg'].forEach(u => urls.add(abs(u)));
   for (const m of MODES) urls.add(abs(`textures/${m.hdr}.hdr`));
-  try { for (const k of await (await fetch('batiments/liste.json')).json()) urls.add(abs(`batiments/${k}.json`)); } catch (e) { }
+  let packs = []; try { packs = (await (await fetch('batiments/paquets/liste.json', { cache: 'no-cache' })).json()).map(p => abs(`batiments/paquets/${p}.json`)); } catch (e) { fail0 = true; }
   const c = await caches.open('dow-1'), have = new Set((await c.keys()).map(r => r.url));
-  const list = [...urls].filter(u => !have.has(u)), total = list.length; let done = 0, fail = 0;
+  const files = [...urls].filter(u => !have.has(u)), list = [...files.map(u => [u, 0]), ...packs.map(u => [u, 1])], total = list.length; let done = 0, fail = fail0 ? 1 : 0;
+  const json = { headers: { 'Content-Type': 'application/json' } };
   const work = async () => {
-    while (list.length) { const u = list.pop();
-      try { const r = await fetch(u, { cache: 'no-cache' }); if (r.ok) await c.put(u, r); else if (r.status !== 404) fail++; } catch (e) { fail++; }
-      if (++done % 40 === 0 || done === total) $('offtxt').textContent = `Téléchargement de Dakar… ${Math.round(done / total * 100)} %`; }
+    while (list.length) { const [u, pack] = list.shift();
+      try { const r = await fetch(u, { cache: 'no-cache' }); if (!r.ok) { if (r.status !== 404) fail++; }
+        else if (!pack) await c.put(u, r);
+        else for (const [k, v] of Object.entries(await r.json())) await c.put(abs(`batiments/${k}.json`), new Response(JSON.stringify(v), json)); // un paquet de 2 km -> ses carres de 200 m
+      } catch (e) { fail++; }
+      $('offtxt').textContent = `Téléchargement de Dakar… ${Math.round(++done / total * 100)} %`; }
   };
-  await Promise.all(Array.from({ length: 12 }, work));
+  await Promise.all(Array.from({ length: 6 }, work));
   if (!fail) try { localStorage.setItem(OFF_KEY, Date.now()); } catch (e) { }
   btn.disabled = false; offlineLabel();
   if (fail) $('offtxt').textContent = `${fail} fichiers n’ont pas pu être téléchargés : relance quand le réseau est meilleur.`;

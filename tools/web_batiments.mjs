@@ -20,5 +20,8 @@ for (const p of JSON.parse(fs.readFileSync(src, 'utf8'))) {
 }
 const dir = new URL('../batiments/', import.meta.url); fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir);
 let bytes = 0; for (const [k, v] of out) { const t = JSON.stringify(v); bytes += t.length; fs.writeFileSync(new URL(`${k}.json`, dir), t); }
-fs.writeFileSync(new URL('liste.json', dir), JSON.stringify([...out.keys()])); // pour le telechargement hors ligne du site
+// paquets de 2 km (10 x 10 carres) pour le telechargement hors ligne du site : ~180 requetes au lieu de ~10 700
+const packs = new Map(); for (const [k, v] of out) { const [gx, gz] = k.split('_').map(Number), p = `${Math.floor(gx / 10)}_${Math.floor(gz / 10)}`; (packs.get(p) || packs.set(p, {}).get(p))[k] = v; }
+fs.mkdirSync(new URL('paquets/', dir)); for (const [p, v] of packs) fs.writeFileSync(new URL(`paquets/${p}.json`, dir), JSON.stringify(v));
+fs.writeFileSync(new URL('paquets/liste.json', dir), JSON.stringify([...packs.keys()]));
 console.log('ajoutes', added, 'deja dans OSM', dup, 'fichiers', out.size, 'Mo', (bytes / 1e6).toFixed(1));
