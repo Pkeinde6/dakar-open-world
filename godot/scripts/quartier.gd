@@ -82,12 +82,15 @@ func _band(st: SurfaceTool, r: Dictionary, o0: float, o1: float, dy: float, only
 		for k in ([0, 1, 2, 0, 2, 3] if up else [0, 2, 1, 0, 3, 2]): st.add_vertex(q[k])
 
 # vertical strip along offset o, from the road profile + y0 to + y1 (both faces)
-func _wall(st: SurfaceTool, r: Dictionary, o: float, y0: float, y1: float, only_up := true) -> void:
+func _wall(st: SurfaceTool, r: Dictionary, o: float, y0: float, y1: float, only_up := true, clip := false) -> void:
 	for i in r.pts.size() - 1:
 		var a := _p3(r, i); var b := _p3(r, i + 1)
 		if only_up and maxf(a.y, b.y) < 0.5 and r.t != 0: continue
 		var d := Vector3(b.x - a.x, 0, b.z - a.z); if d.length() < 0.01: continue
 		var n := Vector3(-d.z, 0, d.x).normalized() * o
+		if clip: # bordure de trottoir : pas en travers de la chaussee d'une autre rue
+			var m0 := Vector2(a.x + n.x, a.z + n.z); var m1 := Vector2(b.x + n.x, b.z + n.z)
+			if ville.on_road(m0.lerp(m1, 0.5), 0.3, r) or ville.on_road(m0, 0.0, r) or ville.on_road(m1, 0.0, r): continue
 		var q := [a + n + Vector3.UP * y0, b + n + Vector3.UP * y0, b + n + Vector3.UP * y1, a + n + Vector3.UP * y1]
 		for k in [0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2]: st.add_vertex(q[k])
 
@@ -104,7 +107,7 @@ func _roads() -> void:
 		# trottoirs (seulement au sol), bordure surelevee de 15 cm
 		if r.side > 0.5 and r.t != 0:
 			_band(walk, r, hw, hw + r.side, 0.2, false, true, true, true); _band(walk, r, -hw - r.side, -hw, 0.2, false, true, true, true)
-			_wall(walk, r, hw, 0.05, 0.2, false); _wall(walk, r, -hw, 0.05, 0.2, false)
+			_wall(walk, r, hw, 0.05, 0.2, false, true); _wall(walk, r, -hw, 0.05, 0.2, false, true)
 		# tablier : dessous et rives en beton, glissieres en beton (type New Jersey) sur les ponts et l'autoroute
 		_band(deck, r, -hw - 0.4, hw + 0.4, -0.9, true, false, false)
 		_wall(deck, r, hw + 0.4, -0.9, 0.05); _wall(deck, r, -hw - 0.4, -0.9, 0.05)
