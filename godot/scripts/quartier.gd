@@ -4,6 +4,7 @@ extends Node3D
 
 var key := ""
 var rect := Rect2() # emprise de la tuile en metres
+var glass_st: SurfaceTool
 var neighbours := [] # batiments des tuiles voisines : leur terrain est pris, rien ne se pose dessus
 
 # d : la tuile (godot/data/tuiles/x_z.json) ; ctx : les routes des 8 tuiles voisines (pour les tests de proximite au bord)
@@ -24,6 +25,14 @@ func build(d: Dictionary, ctx: Array, tx: int, tz: int, size: float) -> void:
 		if mx.x < rect.position.x - 20 or mn.x > rect.end.x + 20 or mx.y < rect.position.y - 20 or mn.y > rect.end.y + 20: continue
 		for x in range(floori(mn.x / 4), floori(mx.x / 4) + 1):
 			for z in range(floori(mn.y / 4), floori(mx.y / 4) + 1): occupied[Vector2i(x, z)] = true
+	for poly in data.parks + data.places.map(func(p): return p.pts): # parcs et places : terrain public, aucune maison dessus
+		var pts := PackedVector2Array()
+		for p in poly: pts.append(Vector2(p[0], p[1]))
+		var mn := Vector2(1e9, 1e9); var mx := Vector2(-1e9, -1e9)
+		for p in pts: mn = mn.min(p); mx = mx.max(p)
+		for x in range(floori(mn.x / 4), floori(mx.x / 4) + 1):
+			for z in range(floori(mn.y / 4), floori(mx.y / 4) + 1):
+				if Geometry2D.is_point_in_polygon(Vector2(x * 4 + 2, z * 4 + 2), pts): occupied[Vector2i(x, z)] = true
 	ville = preload("res://scripts/ville.gd").new(self, data, ctx)
 	_roads()
 	ville.mosques()
@@ -188,6 +197,7 @@ func _buildings() -> void:
 		var pts := PackedVector2Array()
 		for p in b.pts: pts.append(Vector2(p[0], p[1]))
 		if pts.size() < 3 or absf(_area(pts)) < 15: continue
+		if not b.mosque and not _pull_back(pts): continue # comme le site : murs ramenes derriere le trottoir, sinon pas de batiment
 		var bb0 := Rect2(pts[0], Vector2.ZERO)
 		for p in pts: bb0 = bb0.expand(p)
 		for x in range(floori(bb0.position.x / 4), floori(bb0.end.x / 4) + 1):
@@ -199,7 +209,10 @@ func _buildings() -> void:
 		var key := Vector2i(floori(pts[0].x / 250.0), floori(pts[0].y / 250.0))
 		if not cells.has(key):
 			var nst := SurfaceTool.new(); nst.begin(Mesh.PRIMITIVE_TRIANGLES); cells[key] = nst
-		var st: SurfaceTool = cells[key]; st.set_color(col)
+		var glass_tower: bool = b.get("style", "") == "plateau" and h >= 18 and not b.mosque and rng.randf() < 0.4 # tours de verre du Plateau
+		if glass_tower:
+			if glass_st == null: glass_st = SurfaceTool.new(); glass_st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var st: SurfaceTool = glass_st if glass_tower else cells[key]; st.set_color(col)
 		if not b.mosque and b.get("use", "") == "" and rng.randf() < 0.45:
 			var cc := Vector2.ZERO
 			for p in pts: cc += p
@@ -220,6 +233,25 @@ func _buildings() -> void:
 			for z in range(floori(bb.position.y / 4), floori(bb.end.y / 4) + 1): occupied[Vector2i(x, z)] = true
 	for st in cells.values():
 		st.generate_normals(); _static(st.commit(), m)
+	if glass_st: # mur-rideau bleu-vert qui reflete le ciel
+		var gm := StandardMaterial3D.new(); gm.albedo_color = Color(0.32, 0.45, 0.5); gm.metallic = 0.85; gm.roughness = 0.08; gm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		glass_st.generate_normals(); _static(glass_st.commit(), gm)
+
+# OSM et largeurs de rue ne s'accordent pas toujours : chaque coin qui mord sur une rue (chaussee + trottoir) est
+# repousse dehors ; un batiment enfonce de plus de 6 m dans la rue est abandonne (false)
+func _pull_back(pts: PackedVector2Array) -> bool:
+	for i in pts.size():
+		for it in 3:
+			var nr: Dictionary = ville.nearest(pts[i])
+			if nr.is_empty(): break
+			var band: float = nr.r.w / 2.0 + maxf(0.3, nr.r.side) + 0.3
+			var over: float = band - nr.d
+			if over <= 0: break
+			if nr.r.y != null: break # sous un pont : rien a repousser
+			if over > 6.0: return false
+			var out: Vector2 = (pts[i] - nr.p).normalized() if nr.d > 0.01 else Vector2(1, 0)
+			pts[i] += out * (over + 0.05)
+	return absf(_area(pts)) >= 12
 
 func _area(p: PackedVector2Array) -> float:
 	var s := 0.0

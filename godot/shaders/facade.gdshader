@@ -1,5 +1,6 @@
 // Facades de Dakar : enduit (texture scannee) teinte par batiment, fenetres a grille et volets tous les 3,5 m x 3,1 m
 shader_type spatial;
+render_mode cull_disabled; // les contours OSM tournent dans les deux sens : murs et toit visibles quoi qu'il arrive
 uniform sampler2D plaster : source_color, filter_linear_mipmap, repeat_enable;
 varying vec3 wpos;
 varying vec3 wnorm;

@@ -227,5 +227,6 @@ func _apply_quality() -> void:
 				n.visibility_range_end = n.get_meta("vis0") * [0.55, 0.75, 1.0, 1.25][level]
 
 func _capture_view() -> Array:
-	if view == "ciel": return [avatar.global_position + Vector3(-160, 140, -160), avatar.global_position]
+	if view == "ciel": return [avatar.global_position + Vector3(0, 45, -70), avatar.global_position] # comme DOW.vue(45, 70) sur le site
+	if view == "haut": return [avatar.global_position + Vector3(-160, 140, -160), avatar.global_position]
 	return [avatar.global_position + Vector3(-2.2, 1.7, -3.2), avatar.global_position + Vector3.UP * 1.1]
