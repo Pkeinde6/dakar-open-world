@@ -24,7 +24,8 @@ func _ready() -> void:
 	_greenery()
 	car = preload("res://scripts/car.gd").new(); add_child(car); car.setup("res://models/corolla_roues.glb", Color("f2c200"))
 	car.global_position = _spawn_point() + Vector3(0, 0.6, 0)
-	avatar = preload("res://scripts/avatar.gd").new(); add_child(avatar); avatar.setup("res://models/gens_jeune.glb")
+	avatar = preload("res://scripts/avatar.gd").new(); add_child(avatar)
+	avatar.setup("res://models/mixamo/leonard.fbx", {"Idle": "res://models/mixamo/idle.fbx", "Run": "res://models/mixamo/running.fbx", "Enter": "res://models/mixamo/entering_car.fbx"})
 	avatar.global_position = car.global_position + car.global_basis.x * 2.6
 	_passersby()
 	cam = Camera3D.new(); cam.fov = 60; cam.far = 1500; add_child(cam)
@@ -173,7 +174,12 @@ func _physics_process(_dt: float) -> void:
 var _f_held := false
 
 func _enter_car() -> void:
-	driving = true; avatar.visible = false; avatar.process_mode = Node.PROCESS_MODE_DISABLED; car.driven = true
+	driving = true; car.driven = false
+	var t: float = avatar.enter_car() # il ouvre la portiere et s'assoit, puis on prend le volant
+	avatar.look_at(car.global_position, Vector3.UP, true)
+	await get_tree().create_timer(t).timeout
+	if not driving: return
+	avatar.visible = false; avatar.process_mode = Node.PROCESS_MODE_DISABLED; car.driven = true
 func _leave_car() -> void:
 	driving = false; car.driven = false; avatar.global_position = car.global_position + car.global_basis.x * 2.2 + Vector3.UP * 0.5
 	avatar.visible = true; avatar.process_mode = Node.PROCESS_MODE_INHERIT
@@ -185,7 +191,7 @@ func _process(dt: float) -> void:
 	var want := target.global_position - fwd * back + Vector3.UP * up
 	var look := target.global_position + Vector3.UP * 1.2
 	if capture != "":
-		cam.global_position = car.global_position + Vector3(-7, 3.2, -9); look = (car.global_position + avatar.global_position) / 2 + Vector3.UP * 1.0
+		cam.global_position = avatar.global_position + Vector3(-2.2, 1.7, -3.2); look = avatar.global_position + Vector3.UP * 1.1
 	elif frames > 2: cam.global_position = cam.global_position.lerp(want, clamp(dt * 5.0, 0, 1))
 	else: cam.global_position = want
 	cam.look_at(look)
