@@ -442,7 +442,7 @@ func _forest(path: String, spots: Array, rng: RandomNumberGenerator, trunk_r: fl
 			mm.set_instance_transform(j2, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s)), Vector3(q.x, 0, q.y) - centre))
 			var body := StaticBody3D.new(); var cs := CollisionShape3D.new(); var sh := CylinderShape3D.new(); sh.radius = trunk_r * s; sh.height = 3; cs.shape = sh; cs.position.y = 1.5; body.add_child(cs); body.position = Vector3(q.x, 0, q.y); add_child(body)
 		mm.custom_aabb = AABB(Vector3(-120, -2, -120), Vector3(240, 30, 240))
-		var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.position = centre; mi.visibility_range_end = 280.0; add_child(mi)
+		var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.position = centre; mi.visibility_range_end = 280.0; mi.visibility_range_end_margin = 30.0; mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF; add_child(mi)
 	scn.queue_free()
 
 static var _leaf: StandardMaterial3D # partage par toutes les tuiles

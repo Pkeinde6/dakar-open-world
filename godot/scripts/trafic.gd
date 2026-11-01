@@ -71,8 +71,15 @@ func _spawn(c: Dictionary, around: Vector3) -> void:
 		if r.t > 5 or r.pts.size() < 2: continue
 		var i: int = randi() % (r.pts.size() - 1); var p := Vector3(r.pts[i][0], 0, r.pts[i][1])
 		var dd := p.distance_to(around)
-		if dd < 60 or dd > 240: continue
+		if dd < 70 or dd > 260 or _seen(p, 150.0): continue # jamais sous les yeux du joueur : derriere lui ou loin
 		c.r = r; c.dir = 1 if randf() < 0.5 else -1; c.s = _cum(r, i); c.v = c.vmax * 0.6; c.body.visible = true; return
+
+# le point est-il dans le champ de la camera (et pas trop loin) ?
+func _seen(p: Vector3, far: float) -> bool:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null: return false
+	if cam.global_position.distance_to(p) > far: return false
+	return not cam.is_position_behind(p + Vector3.UP) and cam.is_position_in_frustum(p + Vector3.UP)
 
 func _cum(r: Dictionary, upto: int) -> float:
 	if not r.has("cum"):
@@ -93,7 +100,9 @@ func _at(r: Dictionary, s: float) -> Array:
 func _turn(c: Dictionary) -> void: # au bout de la rue : une autre rue qui part du meme carrefour, sinon demi-tour
 	var r: Dictionary = c.r; var e: int = r.pts.size() - 1 if c.dir > 0 else 0
 	var opts: Array = ends.get(_key(r.pts[e]), []).filter(func(o): return o[0] != r and o[0].t <= 5)
-	if opts.is_empty(): c.dir = -c.dir; return
+	if opts.is_empty(): # impasse ou tuile voisine pas encore construite
+		if not _seen(c.pos, 400.0): c.r = null; c.body.visible = false; return # hors de vue : elle repart ailleurs
+		c.dir = -c.dir; c.v = 0.0; c.s = clampf(c.s, 0.0, _cum(r, r.pts.size() - 1)); return # sous les yeux : arret puis demi-tour
 	var o: Array = opts[randi() % opts.size()]; c.r = o[0]
 	if o[1] == 0: c.dir = 1; c.s = 0.0
 	else: c.dir = -1; c.s = _cum(c.r, c.r.pts.size() - 1)
@@ -110,7 +119,7 @@ func _physics_process(dt: float) -> void:
 	var pl: Node3D = main.car if main.driving else main.avatar
 	var ppos := pl.global_position
 	for c in cars:
-		if c.r == null or c.pos.distance_to(ppos) > 280:
+		if c.r == null or (c.pos.distance_to(ppos) > 280 and not _seen(c.pos, 400.0)):
 			c.body.visible = false; c.r = null; _spawn(c, ppos)
 			if c.r == null: continue
 		var r: Dictionary = c.r; var total: float = _cum(r, r.pts.size() - 1)

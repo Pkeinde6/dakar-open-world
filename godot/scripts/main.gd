@@ -204,8 +204,14 @@ func _process(dt: float) -> void:
 	var look := target.global_position + Vector3.UP * 1.2
 	if capture != "":
 		var v := _capture_view(); cam.global_position = v[0]; look = v[1]
-	elif frames > 2: cam.global_position = cam.global_position.lerp(want, clamp(dt * 5.0, 0, 1))
-	else: cam.global_position = want
+	else:
+		# un mur entre la voiture et la camera : la camera se rapproche (sinon elle passe dans les immeubles)
+		var from := target.global_position + Vector3.UP * 1.5
+		var q := PhysicsRayQueryParameters3D.create(from, want); q.exclude = [car.get_rid(), avatar.get_rid()]
+		var hit := get_world_3d().direct_space_state.intersect_ray(q)
+		if not hit.is_empty(): want = hit.position + (from - want).normalized() * 0.4
+		if frames > 2 and hit.is_empty(): cam.global_position = cam.global_position.lerp(want, clamp(dt * 5.0, 0, 1))
+		else: cam.global_position = want
 	cam.look_at(look)
 	frames += 1
 	clock += dt

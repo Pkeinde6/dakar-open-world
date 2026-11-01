@@ -103,7 +103,8 @@ func flush_models() -> void:
 					var t: Transform3D = placed[name][ids[j]][0] * md.norm * pair[1]; t.origin -= centre
 					mm.set_instance_transform(j, t); mm.set_instance_color(j, placed[name][ids[j]][1])
 				mm.custom_aabb = AABB(Vector3(-cs / 2.0 - 30, -5, -cs / 2.0 - 30), Vector3(cs + 60, 80, cs + 60))
-				var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.position = centre; mi.visibility_range_end = 130.0 if heavy else 380.0; m.add_child(mi)
+				var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.position = centre; mi.visibility_range_end = 170.0 if heavy else 380.0
+				mi.visibility_range_end_margin = 30.0; mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF; m.add_child(mi) # apparition en fondu, pas d'un coup
 
 # oriented box of a footprint: the edge direction giving the smallest rectangle
 func obb(pts: PackedVector2Array) -> Dictionary:
