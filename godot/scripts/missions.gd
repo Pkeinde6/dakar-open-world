@@ -49,8 +49,10 @@ func setup(m: Node3D, monde: Dictionary, hud: CanvasLayer) -> void:
 	# colonne jaune lumineuse du client ou de la destination
 	marker = Node3D.new(); add_child(marker); marker.visible = false
 	var col := CylinderMesh.new(); col.top_radius = 4.5; col.bottom_radius = 4.5; col.height = 40; col.cap_top = false; col.cap_bottom = false
-	var cm := StandardMaterial3D.new(); cm.albedo_color = Color(1, 0.82, 0.25, 0.25); cm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; cm.cull_mode = BaseMaterial3D.CULL_DISABLED; cm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	var cm := StandardMaterial3D.new(); cm.albedo_color = Color(1, 0.8, 0.15, 0.45); cm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; cm.cull_mode = BaseMaterial3D.CULL_DISABLED # bien visible en plein jour
 	var cmi := MeshInstance3D.new(); cmi.mesh = col; cmi.material_override = cm; cmi.position.y = 20; marker.add_child(cmi)
+	var ring := TorusMesh.new(); ring.inner_radius = 4.0; ring.outer_radius = 4.8; var rm := StandardMaterial3D.new(); rm.albedo_color = Color(1, 0.8, 0.15); rm.emission_enabled = true; rm.emission = Color(1, 0.75, 0.1); rm.emission_energy_multiplier = 2.0
+	var rmi := MeshInstance3D.new(); rmi.mesh = ring; rmi.material_override = rm; rmi.scale = Vector3(1, 0.15, 1); rmi.position.y = 0.3; marker.add_child(rmi) # anneau jaune au sol
 	# marquage au sol : chevrons violets qui defilent dans le sens de la marche
 	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8); img.fill(Color(0, 0, 0, 0))
 	for y in 64:

@@ -12,6 +12,7 @@ var tiles := {} # "x_z" -> Quartier construit
 var pending := {} # "x_z" -> true pendant la construction
 var known := {} # tuiles qui existent dans les donnees
 var building := false
+var loading := {} # "x_z" -> chemin de la scene pre-construite en cours de chargement
 var car: VehicleBody3D
 var avatar: CharacterBody3D
 var cam: Camera3D
@@ -93,7 +94,11 @@ func _load_now(k: String) -> void:
 	if known.has(k): _attach(await _make(k))
 
 func _attach(q: Node3D) -> void:
-	add_child(q); tiles[q.key] = q; pending.erase(q.key); building = false; _refresh_data()
+	add_child(q); tiles[q.key] = q; pending.erase(q.key); building = false
+	var feux := {} # materiaux des feux tricolores de la tuile : "Ar", "Bg"...
+	for n in q.find_children("*", "MeshInstance3D", true, false):
+		if n.has_meta("feu"): feux[n.material_override] = n.get_meta("feu")
+	q.set_meta("feux", feux); _refresh_data()
 
 func _refresh_data() -> void: # routes, feux, stations des tuiles chargees : pour le trafic et la mini-carte
 	data.roads.clear(); data.signals.clear(); data.fuel.clear()
@@ -121,7 +126,19 @@ func _stream() -> void:
 			if d < bd: bd = d; best = k
 	if best == "": return
 	building = true; pending[best] = true
-	_attach(await _make(best, true)) # sur le fil principal : depuis un autre fil, chaque appel a Godot attend l'image suivante (30 fois plus lent)
+	var cuit := "res://cuit/%s.scn" % best
+	if ResourceLoader.exists(cuit): # tuile pre-construite (tools/precuire.gd) : chargee en arriere-plan, sans calcul
+		ResourceLoader.load_threaded_request(cuit, "PackedScene", true); loading[best] = cuit
+	else: _attach(await _make(best, true)) # sinon construite ici, etape par etape (depuis un autre fil, chaque appel a Godot attend l'image suivante)
+
+func _poll_loads() -> void: # tuiles pre-construites dont le chargement est fini : on les pose
+	for k in loading.keys():
+		var st := ResourceLoader.load_threaded_get_status(loading[k])
+		if st == ResourceLoader.THREAD_LOAD_IN_PROGRESS: continue
+		var path: String = loading[k]; loading.erase(k)
+		if st != ResourceLoader.THREAD_LOAD_LOADED: building = false; pending.erase(k); continue
+		var q: Node3D = (ResourceLoader.load_threaded_get(path) as PackedScene).instantiate()
+		q.key = k; q.set_meta("data", _read(k)); _attach(q)
 
 # ---------------------------------------------------------------- lumiere, sol
 func _environment() -> void:
@@ -195,6 +212,7 @@ func _leave_car() -> void:
 	avatar.visible = true; avatar.process_mode = Node.PROCESS_MODE_INHERIT
 
 func _process(dt: float) -> void:
+	_poll_loads()
 	_stream()
 	var target: Node3D = car if driving else avatar
 	ground.global_position = Vector3(snappedf(target.global_position.x, 50), 0, snappedf(target.global_position.z, 50))
@@ -215,7 +233,10 @@ func _process(dt: float) -> void:
 	cam.look_at(look)
 	frames += 1
 	clock += dt
-	if ville: ville.tick_lights(clock)
+	var V := preload("res://scripts/ville.gd")
+	for q in tiles.values(): # cycle des feux : groupe est-ouest et groupe nord-sud en alternance
+		var feux: Dictionary = q.get_meta("feux", {})
+		for mt in feux: mt.emission_energy_multiplier = 3.0 if V.light_state(clock, feux[mt][0]) == feux[mt][1] else 0.0
 	if water: water.uv1_offset += Vector3(dt * 0.02, 0, dt * 0.012) # vagues qui glissent
 	fps_label.text = "%d images/s · qualité %s · %d tuiles" % [Engine.get_frames_per_second(), ["très basse", "basse", "moyenne", "haute"][level], tiles.size()]
 	if driving: hint.text = "[F]  Descendre de la voiture"

@@ -13,6 +13,7 @@ var m: Node3D # main.gd
 var data: Dictionary
 var rng := RandomNumberGenerator.new()
 var grid := {} # cellule de 40 m -> [route, indice de segment], pour les tests de proximite rapides
+static var shared_meshes := {} # "modele_i" -> maillage (facade coloriable), commun a toutes les tuiles
 static var models := {} # nom -> {meshes, size, norm}, partage par toutes les tuiles
 var placed := {} # nom -> [[Transform3D, Color]]
 var skip_buildings := {} # indices de batiments remplaces par une mosquee
@@ -81,12 +82,16 @@ func flush_models() -> void:
 	print("modeles places : ", placed.keys().map(func(k): return "%s=%d" % [k, placed[k].size()]))
 	for name in placed:
 		var md: Dictionary = model(name)
-		for pair in md.meshes:
-			var mesh: Mesh = pair[0].duplicate()
-			for i in mesh.get_surface_count():
-				var sm := mesh.surface_get_material(i)
-				if sm is StandardMaterial3D and sm.resource_name.begins_with("Facade"):
-					var f: StandardMaterial3D = sm.duplicate(); f.vertex_color_use_as_albedo = true; mesh.surface_set_material(i, f)
+		for pi in md.meshes.size():
+			var pair: Array = md.meshes[pi]; var mk := "%s_%d" % [name, pi]
+			if not shared_meshes.has(mk): # un seul maillage par modele, partage par toutes les tuiles
+				var mesh0: Mesh = pair[0].duplicate()
+				for i in mesh0.get_surface_count():
+					var sm := mesh0.surface_get_material(i)
+					if sm is StandardMaterial3D and sm.resource_name.begins_with("Facade"):
+						var f: StandardMaterial3D = sm.duplicate(); f.vertex_color_use_as_albedo = true; mesh0.surface_set_material(i, f)
+				shared_meshes[mk] = mesh0
+			var mesh: Mesh = shared_meshes[mk]
 			# voitures et petits objets tres detailles (20 000 a 40 000 triangles) : seulement de pres, par carres de 70 m
 			var heavy: bool = CARS.has(name) or name in ["cafe", "fruitcart", "maisonbasket"]
 			var cs: float = 70.0 if heavy else 200.0
@@ -388,7 +393,7 @@ func furniture() -> void:
 		m._part(g, cyl.call(0.06, 0.08, 3.6), Vector3(0, 1.8, 0), dark, true); m._part(g, box.call(0.35, 1.0, 0.3), Vector3(0, 3.9, 0), dark, false)
 		var grp := "A" if absf(dir.x) > absf(dir.y) else "B"
 		for k in 3:
-			var c: String = ["r", "y", "g"][k]; var bm := MeshInstance3D.new(); bm.mesh = bulb; bm.material_override = tl_mats[grp + c]; bm.position = Vector3(0, 4.25 - k * 0.33, 0.14); g.add_child(bm)
+			var c: String = ["r", "y", "g"][k]; var bm := MeshInstance3D.new(); bm.mesh = bulb; bm.material_override = tl_mats[grp + c]; bm.set_meta("feu", grp + c); bm.position = Vector3(0, 4.25 - k * 0.33, 0.14); g.add_child(bm)
 
 # cycle des feux sur 30 s : groupe A vert 12 s, orange 3 s, rouge 15 s ; groupe B decale de 15 s (vert quand A est rouge)
 static func light_state(t: float, grp: String) -> String:

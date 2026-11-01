@@ -273,6 +273,14 @@ func _buildings() -> void:
 # OSM et largeurs de rue ne s'accordent pas toujours : chaque coin qui mord sur une rue (chaussee + trottoir) est
 # repousse dehors ; un batiment enfonce de plus de 6 m dans la rue est abandonne (false)
 func _pull_back(pts: PackedVector2Array) -> bool:
+	var c := Vector2.ZERO
+	for p in pts: c += p
+	c /= pts.size()
+	for sg in ville.near_segs(c): # un batiment que l'axe d'une rue traverse barre la rue : on l'abandonne
+		var r: Dictionary = sg[0]
+		if r.t == 9 or r.y != null: continue
+		var seg := PackedVector2Array([Vector2(r.pts[sg[1]][0], r.pts[sg[1]][1]), Vector2(r.pts[sg[1] + 1][0], r.pts[sg[1] + 1][1])])
+		if not Geometry2D.intersect_polyline_with_polygon(seg, pts).is_empty(): return false
 	for i in pts.size():
 		for it in 3:
 			var nr: Dictionary = ville.nearest(pts[i])
@@ -424,10 +432,13 @@ func _greenery() -> void:
 # one MultiMesh per tree model, plus a solid trunk collider each
 func _forest(path: String, spots: Array, rng: RandomNumberGenerator, trunk_r: float) -> void:
 	var scn: Node3D = load(path).instantiate(); var src: MeshInstance3D = scn.find_children("*", "MeshInstance3D", true, false)[0]
-	var mesh: Mesh = src.mesh.duplicate()
-	for i in mesh.get_surface_count(): # feuilles : texture decoupee (alpha), visibles des deux cotes
-		var sm := mesh.surface_get_material(i)
-		if sm and sm.resource_name.begins_with("Feuilles"): mesh.surface_set_material(i, _leaf_mat())
+	if not tree_meshes.has(path): # un seul maillage par modele d'arbre, partage par toutes les tuiles (et enregistre une fois a la pre-construction)
+		var mesh0: Mesh = src.mesh.duplicate()
+		for i in mesh0.get_surface_count(): # feuilles : texture decoupee (alpha), visibles des deux cotes
+			var sm := mesh0.surface_get_material(i)
+			if sm and sm.resource_name.begins_with("Feuilles"): mesh0.surface_set_material(i, _leaf_mat())
+		tree_meshes[path] = mesh0
+	var mesh: Mesh = tree_meshes[path]
 	var cells := {} # arbres groupes par carre de 200 m : seuls les proches sont dessines (feuilles = beaucoup de triangles)
 	for q in spots:
 		var key := Vector2i(floori(q.x / 200.0), floori(q.y / 200.0))
@@ -446,6 +457,7 @@ func _forest(path: String, spots: Array, rng: RandomNumberGenerator, trunk_r: fl
 	scn.queue_free()
 
 static var _leaf: StandardMaterial3D # partage par toutes les tuiles
+static var tree_meshes := {}
 func _leaf_mat() -> StandardMaterial3D:
 	if _leaf: return _leaf
 	var img := Image.create(128, 128, true, Image.FORMAT_RGBA8); img.fill(Color(0, 0, 0, 0))
