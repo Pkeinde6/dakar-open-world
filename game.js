@@ -199,10 +199,27 @@ function findRoute(x0, z0, x1, z1) {
 }
 let route = null, routeT = 0;
 function updateRoute(dt) {
-  if (!waypoint) { route = null; return; }
-  if (Math.hypot(waypoint[0] - player.x, waypoint[1] - player.z) < 40) { toast('Tu es arrivé à destination'); waypoint = null; route = null; return; }
+  routeTex.offset.y -= dt * 0.8; // les chevrons avancent
+  if (!waypoint) { if (route) { route = null; drawRouteMarking(); } return; }
+  if (Math.hypot(waypoint[0] - player.x, waypoint[1] - player.z) < 40) { toast('Tu es arrivé à destination'); waypoint = null; route = null; drawRouteMarking(); return; }
   routeT -= dt; if (routeT > 0) return; routeT = 3;
   route = findRoute(player.x, player.z, waypoint[0], waypoint[1]);
+  drawRouteMarking();
+}
+// marquage au sol de l'itineraire : bande violette a chevrons (700 premiers metres), qui suit les ponts et defile vers la destination
+function drawRouteMarking() {
+  const pos = [], uv = []; let run = 0;
+  if (route && route.path.length) {
+    const pts = [[player.x, player.z], ...route.path, waypoint];
+    for (let i = 0; i < pts.length - 1 && run < 700; i++) {
+      const [ax, az] = pts[i], [bx, bz] = pts[i + 1], L = Math.hypot(bx - ax, bz - az); if (L < 0.3) continue;
+      const nx = -(bz - az) / L * 0.8, nz = (bx - ax) / L * 0.8, ya = surfaceY(ax, az, player.y || 0) + 0.12, yb = surfaceY(bx, bz, player.y || 0) + 0.12;
+      const q = [[ax - nx, ya, az - nz, 0, run], [bx - nx, yb, bz - nz, 0, run + L], [bx + nx, yb, bz + nz, 1, run + L], [ax + nx, ya, az + nz, 1, run]];
+      for (const k of [0, 1, 2, 0, 2, 3]) { pos.push(q[k][0], q[k][1], q[k][2]); uv.push(q[k][3], -q[k][4] / 2.5); }
+      run += L;
+    }
+  }
+  const g = routeMesh.geometry; g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeBoundingSphere();
 }
 function strokeRoute(ctx, w) {
   if (!route) return; ctx.strokeStyle = '#c86bff'; ctx.lineWidth = w; ctx.beginPath();
@@ -2481,6 +2498,11 @@ function chapterCard() {
   $('storycard').style.display = 'flex'; started = false;
   $('storygo').onclick = () => { $('storycard').style.display = 'none'; started = true; if (c.car) setPlayerCar(c.car); mission = null; };
 }
+// marquage au sol de l'itineraire (voir drawRouteMarking)
+const routeTex = canvasTex(64, 64, (g) => { for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { const v = Math.abs(x - 32) / 32, row = (y + v * 22) % 32;
+  if (row < 11) { g.fillStyle = 'rgba(205,80,255,.95)'; g.fillRect(x, y, 1, 1); } else if (Math.abs(x - 32) > 28) { g.fillStyle = 'rgba(190,80,255,.6)'; g.fillRect(x, y, 1, 1); } } });
+const routeMat = new THREE.MeshBasicMaterial({ map: routeTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+const routeMesh = new THREE.Mesh(new THREE.BufferGeometry(), routeMat); routeMesh.frustumCulled = false; routeMesh.renderOrder = 3; scene.add(routeMesh);
 // mission marker: glowing yellow column like in GTA
 const markerMat = new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
 const marker = new THREE.Group(); marker.add(new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 40, 24, 1, true).translate(0, 20, 0), markerMat));
@@ -2597,7 +2619,7 @@ function skipTravel() { // fast-forward a long regional trip
   if (lieu.length === 2 && lieu.every(Number.isFinite)) spawnAt(...ll(lieu[0], lieu[1]));
   else spawnAt(CITIES[1].p[0], CITIES[1].p[1]);
   if (url.has('cap')) player.h = THREE.MathUtils.degToRad(+url.get('cap'));
-  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, keys, get chunks() { return chunks; } };
+  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, get chunks() { return chunks; } };
   $('loadtxt').textContent = 'Prêt. Bienvenue à Dakar.';
   const btn = $('start'); btn.style.display = 'block';
   const go = () => { $('loading').style.display = 'none'; initAudio(); chapterCard(); };
