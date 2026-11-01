@@ -22,7 +22,7 @@ func setup(m: Node3D, d: Dictionary, n: int) -> void:
 			var k := _key(r.pts[e]); if not ends.has(k): ends[k] = []
 			ends[k].append([r, e])
 	for i in n: cars.append(_new_car(MIX[i % MIX.size()]))
-	stars = Label.new(); stars.position = Vector2(12, 40); stars.add_theme_font_size_override("font_size", 30); stars.add_theme_color_override("font_color", Color(1, 0.85, 0.2))
+	stars = Label.new(); stars.anchor_left = 1.0; stars.anchor_right = 1.0; stars.offset_left = -230; stars.position.y = 10; stars.add_theme_font_size_override("font_size", 30); stars.add_theme_color_override("font_color", Color(1, 0.85, 0.2))
 	var hud := CanvasLayer.new(); add_child(hud); hud.add_child(stars)
 
 func _key(p) -> String: return "%d,%d" % [roundi(p[0]), roundi(p[1])]
@@ -37,6 +37,7 @@ func _visual(name: String, length: float) -> Node3D:
 	var k := length / maxf(box.size.x, box.size.z)
 	var holder := Node3D.new(); holder.add_child(v)
 	v.scale = Vector3(k, k, k); v.position = Vector3(-box.get_center().x * k, -box.position.y * k, -box.get_center().z * k)
+	if name in ["taxisn", "ndiaga", "police"]: v.rotate_y(PI); v.position = Vector3(box.get_center().x * k, -box.position.y * k, box.get_center().z * k) # modeles dessines a l'envers
 	if box.size.x > box.size.z: # axe long sur x : on tourne pour qu'il soit sur z (le sens de la marche)
 		var piv := Node3D.new(); holder.remove_child(v); piv.add_child(v); piv.rotation.y = PI / 2; holder.add_child(piv)
 	return holder
@@ -143,4 +144,4 @@ func _police(dt: float, ppos: Vector3) -> void:
 	if wanted == 0 and not cops.is_empty():
 		for c in cops: c.body.queue_free()
 		cops.clear()
-	stars.text = "★".repeat(int(ceil(wanted))) + "☆".repeat(5 - int(ceil(wanted))) if wanted > 0 else ""
+	stars.text = "★".repeat(int(ceil(wanted))) + "☆".repeat(5 - int(ceil(wanted)))

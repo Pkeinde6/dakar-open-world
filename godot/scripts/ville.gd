@@ -98,10 +98,12 @@ func flush_models() -> void:
 			for key in cells:
 				var ids: Array = cells[key]
 				var mm := MultiMesh.new(); mm.transform_format = MultiMesh.TRANSFORM_3D; mm.use_colors = true; mm.mesh = mesh; mm.instance_count = ids.size()
+				var centre := Vector3((key.x + 0.5) * cs, 0, (key.y + 0.5) * cs) # le groupe est pose au centre de son carre : la distance d'affichage se mesure de la
 				for j in ids.size():
-					mm.set_instance_transform(j, placed[name][ids[j]][0] * md.norm * pair[1]); mm.set_instance_color(j, placed[name][ids[j]][1])
-				mm.custom_aabb = AABB(Vector3(key.x * cs - 30, -5, key.y * cs - 30), Vector3(cs + 60, 80, cs + 60))
-				var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.visibility_range_end = 130.0 if heavy else 380.0; m.add_child(mi)
+					var t: Transform3D = placed[name][ids[j]][0] * md.norm * pair[1]; t.origin -= centre
+					mm.set_instance_transform(j, t); mm.set_instance_color(j, placed[name][ids[j]][1])
+				mm.custom_aabb = AABB(Vector3(-cs / 2.0 - 30, -5, -cs / 2.0 - 30), Vector3(cs + 60, 80, cs + 60))
+				var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.position = centre; mi.visibility_range_end = 130.0 if heavy else 380.0; m.add_child(mi)
 
 # oriented box of a footprint: the edge direction giving the smallest rectangle
 func obb(pts: PackedVector2Array) -> Dictionary:
@@ -387,6 +389,7 @@ var compounds := [] # empreintes des maisons qui recoivent un mur de cloture
 func _car_xf(name: String, p: Vector2, heading: float) -> Transform3D: # modele a sa vraie longueur, axe long sur la rue
 	var S: Vector3 = model(name).size; var k: float = CARS[name] / maxf(S.x, S.z)
 	var rot := heading + (PI / 2.0 if S.x > S.z else 0.0)
+	if name in ["taxisn", "ndiaga"]: rot += PI # modeles dessines a l'envers
 	return Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3(k, k, k)), Vector3(p.x, 0.05, p.y))
 
 func street_life() -> void:

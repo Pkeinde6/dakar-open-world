@@ -20,6 +20,7 @@ var junctions := {} # noeud (arrondi au metre) -> nombre de routes qui s'y crois
 var concrete: StandardMaterial3D
 var fps_label: Label
 var hint: Label
+var trafic
 var water: StandardMaterial3D
 var lamp_glow: StandardMaterial3D
 var clock := 0.0
@@ -58,9 +59,10 @@ func _ready() -> void:
 	avatar.global_position = car.global_position + car.global_basis.x * 2.6
 	_police()
 	_passersby()
-	var trafic = preload("res://scripts/trafic.gd").new(); add_child(trafic); trafic.setup(self, data, 18) # 18 voitures autour du joueur
+	trafic = preload("res://scripts/trafic.gd").new(); add_child(trafic); trafic.setup(self, data, 18) # 18 voitures autour du joueur
 	cam = Camera3D.new(); cam.fov = 60; cam.far = 900; add_child(cam)
 	var hud := CanvasLayer.new(); add_child(hud); fps_label = Label.new(); fps_label.position = Vector2(12, 8); fps_label.add_theme_font_size_override("font_size", 22); hud.add_child(fps_label)
+	var mini := preload("res://scripts/minimap.gd").new(); hud.add_child(mini); mini.setup(self, data)
 	hint = Label.new(); hint.add_theme_font_size_override("font_size", 28); hint.add_theme_color_override("font_outline_color", Color.BLACK); hint.add_theme_constant_override("outline_size", 8)
 	hint.anchor_left = 0.5; hint.anchor_right = 0.5; hint.anchor_top = 0.82; hint.offset_left = -260; hint.offset_right = 260; hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; hud.add_child(hint)
 
@@ -404,12 +406,13 @@ func _forest(path: String, spots: Array, rng: RandomNumberGenerator, trunk_r: fl
 	for key in cells:
 		var list: Array = cells[key]
 		var mm := MultiMesh.new(); mm.transform_format = MultiMesh.TRANSFORM_3D; mm.mesh = mesh; mm.instance_count = list.size()
+		var centre := Vector3((key.x + 0.5) * 200.0, 0, (key.y + 0.5) * 200.0) # distance d'affichage mesuree depuis le carre
 		for j2 in list.size():
 			var s := rng.randf_range(0.8, 1.25) * (0.62 if path.contains("neem") else 1.0); var q: Vector2 = list[j2] # neems de rue : 6-7 m
-			mm.set_instance_transform(j2, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s)), Vector3(q.x, 0, q.y)))
+			mm.set_instance_transform(j2, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s)), Vector3(q.x, 0, q.y) - centre))
 			var body := StaticBody3D.new(); var cs := CollisionShape3D.new(); var sh := CylinderShape3D.new(); sh.radius = trunk_r * s; sh.height = 3; cs.shape = sh; cs.position.y = 1.5; body.add_child(cs); body.position = Vector3(q.x, 0, q.y); add_child(body)
-		mm.custom_aabb = AABB(Vector3(key.x * 200.0 - 20, -2, key.y * 200.0 - 20), Vector3(240, 30, 240))
-		var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.visibility_range_end = 280.0; add_child(mi)
+		mm.custom_aabb = AABB(Vector3(-120, -2, -120), Vector3(240, 30, 240))
+		var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.position = centre; mi.visibility_range_end = 280.0; add_child(mi)
 	scn.queue_free()
 
 var _leaf: StandardMaterial3D
