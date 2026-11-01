@@ -57,6 +57,7 @@ func _ready() -> void:
 	avatar.global_position = car.global_position + car.global_basis.x * 2.6
 	_police()
 	_passersby()
+	var trafic = preload("res://scripts/trafic.gd").new(); add_child(trafic); trafic.setup(self, data, 18) # 18 voitures autour du joueur
 	cam = Camera3D.new(); cam.fov = 60; cam.far = 900; add_child(cam)
 	var hud := CanvasLayer.new(); add_child(hud); fps_label = Label.new(); fps_label.position = Vector2(12, 8); fps_label.add_theme_font_size_override("font_size", 22); hud.add_child(fps_label)
 
