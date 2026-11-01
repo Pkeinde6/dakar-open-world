@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dakar">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icones/icone-180.png">
+<title>Dakar Open World</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{--hud:#fff;--accent:#f2c230;--wd:#c8f7ff}
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:Inter,system-ui,sans-serif;color:#fff;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  /* appui long sur iPhone : ni selection, ni loupe, ni menu */
+  *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  canvas#game{display:block}
+  .hud{position:fixed;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  /* GTA-style wanted stars */
+  #stars{top:18px;right:24px;font-size:34px;letter-spacing:4px;font-family:Oswald}
+  #stars .on{color:#fff}#stars .off{color:rgba(255,255,255,.18)}
+  #stars.flash .on{animation:fl .5s steps(2) infinite}
+  @keyframes fl{50%{color:rgba(255,255,255,.25)}}
+  #topinfo{top:62px;right:24px;text-align:right;font:600 14px Inter;opacity:.9}
+  /* minimap */
+  #mapwrap{left:22px;bottom:22px;width:300px}
+  #minimap{width:300px;height:200px;border-radius:10px;border:2px solid rgba(0,0,0,.6);box-shadow:0 4px 18px rgba(0,0,0,.5);display:block}
+  #bars{display:flex;gap:4px;margin-top:5px}
+  #bars div{height:7px;border-radius:2px;background:rgba(0,0,0,.5);overflow:hidden;flex:1}
+  #bars i{display:block;height:100%}
+  #hp i{background:#5fb94a}#nitro i{background:linear-gradient(90deg,#2f6bff,#7fd0ff)}#bat i{background:var(--wd)}
+  #street{margin-top:7px;font:700 19px Oswald;letter-spacing:.5px;text-transform:uppercase}
+  #district{font:600 13px Inter;opacity:.85}
+  /* speedo */
+  #speedo{right:28px;bottom:26px;text-align:right;font-family:Oswald}
+  #speedo b{font-size:64px;line-height:1}#speedo span{font-size:16px;opacity:.8;margin-left:4px}
+  #carname{font:600 13px Inter;opacity:.8}
+  /* center messages */
+  #big{top:36%;left:0;right:0;text-align:center;font:700 64px Oswald;letter-spacing:2px;opacity:0;transition:opacity .4s}
+  #big small{display:block;font:400 18px Inter;letter-spacing:0;margin-top:6px}
+  #toast{top:22px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.72);padding:10px 18px;border-radius:6px;font:600 15px Inter;opacity:0;transition:opacity .3s;max-width:70vw;text-align:center}
+  /* watch dogs hack prompt */
+  #hackui{position:fixed;pointer-events:none;font:700 13px Inter;color:var(--wd);text-shadow:0 0 6px rgba(0,200,255,.8);transform:translate(-50%,-120%);white-space:nowrap;display:none}
+  #hackui .k{display:inline-block;border:1.5px solid var(--wd);padding:1px 6px;margin-right:6px;border-radius:3px}
+  #hackui:before{content:"";position:absolute;left:50%;top:100%;width:16px;height:16px;margin:6px 0 0 -9px;border:2px solid var(--wd);transform:rotate(45deg)}
+  #hackline{position:fixed;inset:0;pointer-events:none}
+  #money{top:96px;right:24px;font:700 26px Oswald;color:#7fe08a}
+  #mission{top:18px;left:22px;max-width:380px;background:rgba(0,0,0,.55);padding:10px 14px;border-radius:6px;font:400 14px Inter;line-height:1.45}
+  #mission b{font-weight:600}#mission small{opacity:.75}
+  #subs{left:50%;bottom:64px;transform:translateX(-50%);font:600 18px Inter;background:rgba(0,0,0,.6);padding:8px 16px;border-radius:6px;opacity:0;transition:opacity .3s;max-width:80vw;text-align:center}
+  #subs b{color:#f2c230;margin-right:6px}
+  #storycard{position:fixed;inset:0;z-index:8;display:none;align-items:center;justify-content:center;background:rgba(5,8,12,.82)}
+  #storycard>div{max-width:620px;padding:32px;margin:16px;background:#111;border-left:4px solid #f2c230}
+  #storycard h2{font:700 34px Oswald;margin:0 0 12px}#storycard p{line-height:1.6;opacity:.9}#storycard .m{color:#7fe08a;font-weight:600}
+  #storycard button{margin-top:10px;background:#f2c230;border:0;font:700 18px Oswald;padding:10px 26px;cursor:pointer}
+  #clock{top:130px;right:24px;font:600 18px Oswald;text-align:right}#clock span{display:block;color:#ff6b4a;font-size:13px;letter-spacing:1px}
+  #poicard{top:170px;right:24px;width:330px;background:rgba(10,14,18,.86);border-left:4px solid #4fb3ff;padding:14px 16px;border-radius:4px;opacity:0;transform:translateX(30px);transition:all .4s;text-shadow:none}
+  #poicard small{color:#4fb3ff;font-weight:600;letter-spacing:1px}#poicard h3{font:700 22px Oswald;margin:4px 0 6px}#poicard p{font-size:14px;line-height:1.5;margin:0 0 8px;opacity:.92}
+  #poicard .w{font-size:13px;color:#f2c230}
+  #help{left:50%;bottom:14px;transform:translateX(-50%);font-size:12px;opacity:.75;text-align:center}
+  #siren{position:fixed;inset:0;pointer-events:none}
+  /* menu titre et pause */
+  #loading,#pause{position:fixed;inset:0;display:flex;align-items:flex-end;padding:48px;z-index:10;box-sizing:border-box}
+  #loading{background:#0b0b0d url(textures/menu.jpg) center/cover}
+  #loading:before,#pause:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(5,7,10,.92) 0%,rgba(5,7,10,.6) 45%,rgba(5,7,10,.05) 100%)}
+  .menu{position:relative;max-width:780px}
+  .kicker{font:600 13px Inter;letter-spacing:3px;text-transform:uppercase;color:var(--accent)}
+  #loading h1{font:700 clamp(40px,7vw,76px) Oswald;white-space:nowrap;margin:6px 0 0;letter-spacing:3px;line-height:1;background:linear-gradient(90deg,#00853f,#fdef42,#e31b23);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #loading p{margin:10px 0 18px;opacity:.8;line-height:1.5}
+  #prog{width:min(520px,80vw);height:4px;background:rgba(255,255,255,.15)}#prog i{display:block;height:100%;width:0;background:#fff;transition:width .2s}
+  #menubtns,#pausebtns{display:none;flex-direction:column;align-items:flex-start;gap:14px;margin-top:22px}
+  #pausebtns{display:flex;margin-top:0}
+  .menu button,#ctrlpanel button{font:700 18px Oswald;letter-spacing:1px;cursor:pointer;border:0}
+  .primary{background:#fff;color:#000;padding:14px 40px;font-size:22px!important}
+  .menu button:hover,.menu button:focus-visible,#ctrlpanel button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  .ghost{background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.45)!important;padding:9px 20px;font-size:15px!important}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .qsel{display:flex;border:1.5px solid rgba(255,255,255,.45);border-radius:4px;overflow:hidden}
+  .qsel button{background:transparent;color:#fff;padding:8px 16px;font-size:14px!important;border-right:1px solid rgba(255,255,255,.25)!important}
+  .qsel button:last-child{border-right:0!important}.qsel button.on{background:var(--accent);color:#000}
+  .qlabel{font:600 12px Inter;letter-spacing:1px;text-transform:uppercase;opacity:.7}
+  #ctrlpanel{display:none;position:fixed;inset:0;z-index:12;background:rgba(5,7,10,.88);align-items:center;justify-content:center;padding:16px}
+  #ctrlpanel>div{max-width:720px;max-height:86vh;overflow:auto;background:#111;border-left:4px solid var(--accent);padding:26px 30px;box-sizing:border-box}
+  #ctrlpanel h2{font:700 30px Oswald;margin:0 0 14px}
+  #ctrlpanel dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:0 0 16px;font-size:14px}
+  #ctrlpanel dt{font:600 13px Inter;color:var(--accent)}#ctrlpanel dd{margin:0;opacity:.9}
+  #pause{display:none;z-index:25}
+  #pause:before{background:linear-gradient(90deg,rgba(5,7,10,.94) 0%,rgba(5,7,10,.72) 45%,rgba(5,7,10,.45) 100%)}
+  #pause h2{font:700 56px Oswald;margin:0 0 18px;letter-spacing:2px}
+  #rotate{display:none}
+  /* full map */
+  #fullmap{position:fixed;inset:0;background:#10161d;display:none;z-index:5;cursor:grab}
+  #fullmap canvas{width:100%;height:100%}
+  #fullmap .legend{position:absolute;top:18px;left:22px;font:600 14px Inter;background:rgba(0,0,0,.55);padding:10px 14px;border-radius:6px;line-height:1.6}
+  @media (max-width:700px),(max-height:500px){#mapwrap{width:200px}#minimap{width:200px;height:140px}#speedo b{font-size:42px}#loading h1{font-size:44px}#loading,#pause{padding:20px 24px}#pause h2{font-size:38px;margin-bottom:10px}#menubtns{gap:10px;margin-top:14px}#loading p{margin:6px 0 10px}}
+  /* telephone tenu debout : on demande de le tourner */
+  @media (orientation:portrait){body.touch.playing #rotate{display:flex;position:fixed;inset:0;z-index:30;background:#0b0b0d;color:#fff;flex-direction:column;align-items:center;justify-content:center;text-align:center;font:600 18px Inter;gap:14px;padding:24px}
+    #rotate b{font:700 64px Oswald;display:block;animation:tourne 1.6s ease-in-out infinite}}
+  @keyframes tourne{0%,30%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
+  /* touch controls (phones / tablets) */
+  #touchpad{display:none}
+  body.touch.playing #touchpad{display:block;position:fixed;inset:0;pointer-events:none;z-index:20}
+  .tbtn{pointer-events:auto;position:absolute;border:2px solid rgba(255,255,255,.35);background:rgba(0,0,0,.35);color:#fff;font:700 13px Oswald;border-radius:50%;touch-action:none;-webkit-tap-highlight-color:transparent}
+  .tbtn.on{background:rgba(242,194,48,.55)}
+  #tl,#tr{bottom:calc(20px + env(safe-area-inset-bottom));width:92px;height:92px;font-size:30px}#tl{left:calc(16px + env(safe-area-inset-left))}#tr{left:calc(120px + env(safe-area-inset-left))}
+  #tg{right:calc(16px + env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));width:104px;height:104px;background:rgba(40,160,70,.4)}
+  #tb{right:calc(132px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));width:80px;height:80px;background:rgba(200,50,40,.4)}
+  #tn{right:calc(30px + env(safe-area-inset-right));bottom:calc(140px + env(safe-area-inset-bottom));width:70px;height:70px;background:rgba(47,107,255,.45)}
+  #th{right:calc(122px + env(safe-area-inset-right));bottom:calc(112px + env(safe-area-inset-bottom));width:66px;height:66px;font-size:10px}
+  #tact{position:absolute;top:calc(8px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right));display:grid;grid-template-columns:repeat(3,40px);gap:6px}
+  #tact .tbtn{position:static;width:40px;height:40px;font-size:18px;border-radius:10px}
+  body.touch #help{display:none}
+  body.touch #speedo{right:auto;left:calc(236px + env(safe-area-inset-left));bottom:calc(20px + env(safe-area-inset-bottom));transform:scale(.6);transform-origin:left bottom;text-align:left}
+  body.touch #stars,body.touch #topinfo,body.touch #money,body.touch #clock{right:calc(150px + env(safe-area-inset-right))}
+  body.touch #stars{font-size:22px;top:10px}body.touch #topinfo{top:42px;font-size:12px}body.touch #money{top:62px;font-size:20px}body.touch #clock{top:90px;font-size:14px}
+  body.touch #mission{max-width:min(320px,42vw);font-size:12px;padding:7px 10px;left:calc(8px + env(safe-area-inset-left));top:calc(8px + env(safe-area-inset-top))}
+  body.touch #poicard{display:none}
+  body.touch #toast{top:auto;bottom:calc(150px + env(safe-area-inset-bottom));font-size:13px;max-width:46vw}
+  body.touch #subs{bottom:calc(120px + env(safe-area-inset-bottom));font-size:14px;max-width:50vw}
+  body.touch #mapwrap{transform:scale(.5);transform-origin:left bottom;bottom:calc(126px + env(safe-area-inset-bottom));left:calc(10px + env(safe-area-inset-left))}
+  body.touch #mapwrap #street,body.touch #mapwrap #district{display:none}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="siren"></div>
+<canvas id="hackline"></canvas>
+
+<div class="hud" id="stars"></div>
+<div class="hud" id="topinfo"></div>
+<div class="hud" id="money"></div>
+<div class="hud" id="clock"></div>
+<div class="hud" id="mission"></div>
+<div class="hud" id="subs"></div>
+<div id="storycard"></div>
+<div class="hud" id="poicard"></div>
+<div class="hud" id="mapwrap">
+  <canvas id="minimap" width="600" height="400"></canvas>
+  <div id="bars"><div id="hp"><i style="width:100%"></i></div><div id="bat"><i style="width:100%"></i></div><div id="nitro"><i style="width:100%"></i></div></div>
+  <div id="street"></div>
+  <div id="district"></div>
+</div>
+<div class="hud" id="speedo"><div id="carname"></div><b id="kmh">0</b><span>KM/H</span></div>
+<div class="hud" id="big"></div>
+<div class="hud" id="toast"></div>
+<div class="hud" id="gcredit" style="display:none;position:fixed;right:10px;bottom:4px;font:11px Inter,Arial;color:#fff;text-shadow:0 0 3px #000;opacity:.85"></div>
+<div id="hackui"></div>
+<div class="hud" id="help">ZQSD / Flèches conduire · Espace frein à main · Maj nitro · E pirater un feu · F pirater un véhicule · G blackout · T service on/off · J voyage rapide · Y radio · K Google 3D · M carte · C caméra · N jour/nuit · V changer de voiture · H klaxon · 1 Dakar · 2 Diourbel · 3 Touba · R réapparaître · P qualité</div>
+
+<div id="fullmap"><canvas id="fullcanvas"></canvas>
+  <div class="legend">CARTE — Dakar · Diourbel · Touba<br>Molette : zoom · Glisser : déplacer<br>Clic : placer un repère GPS · Double-clic : s'y téléporter<br>Points bleus « i » : lieux à découvrir (verts = déjà vus)<br>M ou Échap : fermer</div>
+</div>
+
+<div id="loading">
+  <div class="menu">
+    <div class="kicker">Les vraies rues de Dakar · OpenStreetMap</div>
+    <h1>DAKAR OPEN WORLD</h1>
+    <p id="loadtxt">Chargement de la carte réelle (OpenStreetMap)…</p>
+    <div id="prog"><i></i></div>
+    <div id="menubtns">
+      <button id="start" class="primary">JOUER</button>
+      <div class="row"><span class="qlabel">Qualité</span><div class="qsel" role="radiogroup" aria-label="Qualité graphique"></div></div>
+      <div class="row"><button class="ghost" data-ctrl>Commandes</button><button class="ghost" id="offline">Jouer hors ligne</button></div>
+      <div id="offtxt" class="qlabel" style="text-transform:none;letter-spacing:0;font-size:13px"></div>
+    </div>
+  </div>
+</div>
+
+<div id="pause">
+  <div class="menu">
+    <div class="kicker">Dakar Open World</div>
+    <h2>PAUSE</h2>
+    <div id="pausebtns">
+      <button class="primary" id="resume">REPRENDRE</button>
+      <div class="row"><span class="qlabel">Qualité</span><div class="qsel" role="radiogroup" aria-label="Qualité graphique"></div></div>
+      <div class="row"><button class="ghost" data-ctrl>Commandes</button><button class="ghost" id="fullscr">Plein écran</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="ctrlpanel"><div>
+  <h2>Commandes</h2>
+  <dl>
+    <dt>ZQSD / Flèches</dt><dd>Conduire</dd>
+    <dt>Espace</dt><dd>Frein à main</dd>
+    <dt>Maj</dt><dd>Nitro</dd>
+    <dt>F</dt><dd>Pirater un véhicule</dd>
+    <dt>E</dt><dd>Pirater un feu</dd>
+    <dt>G</dt><dd>Blackout du quartier</dd>
+    <dt>T</dt><dd>Service taxi on / off</dd>
+    <dt>J</dt><dd>Voyage rapide</dd>
+    <dt>M</dt><dd>Carte (clic : repère GPS, double-clic : s'y rendre)</dd>
+    <dt>C</dt><dd>Changer de caméra</dd>
+    <dt>N</dt><dd>Jour / nuit</dd>
+    <dt>V</dt><dd>Changer de voiture</dd>
+    <dt>Y · H</dt><dd>Radio · Klaxon</dd>
+    <dt>K</dt><dd>Google 3D</dd>
+    <dt>1 · 2 · 3</dt><dd>Dakar · Diourbel · Touba</dd>
+    <dt>R</dt><dd>Réapparaître</dd>
+    <dt>Échap</dt><dd>Pause</dd>
+  </dl>
+  <p style="opacity:.8;font-size:14px;line-height:1.5">Sur téléphone : tiens-le à l'horizontale. ◀ ▶ pour tourner, GAZ et FREIN à droite, les petits boutons en haut à droite pour la radio, la carte, la caméra et la pause.</p>
+  <button class="primary" id="ctrlclose" style="padding:10px 26px">Fermer</button>
+</div></div>
+
+<div id="rotate"><b>⟲</b>Tourne ton téléphone à l'horizontale pour jouer</div>
+
+<script src="data.js?v=14"></script>
+<script src="bridges.js?v=1"></script>
+<script src="lieux.js?v=1"></script>
+<script src="services.js?v=1"></script>
+<script src="elev.js?v=1"></script>
+<script src="brt.js?v=1"></script>
+<script src="edifices.js?v=1"></script>
+<script src="cle-google.js" onerror="this.remove()"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "3d-tiles-renderer": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.39/src/index.js"
+} }
+</script>
+<script type="module" src="game.js?v=72"></script>
+</body>
+</html>
