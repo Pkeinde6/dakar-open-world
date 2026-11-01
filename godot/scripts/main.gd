@@ -20,6 +20,7 @@ var capture := ""
 var view := "ville"
 var lieu := ""
 var carte
+var missions
 var frames := 0
 var ready_frames := -1
 var fps_label: Label
@@ -63,6 +64,7 @@ func _ready() -> void:
 	var hud := CanvasLayer.new(); add_child(hud); fps_label = Label.new(); fps_label.position = Vector2(12, 8); fps_label.add_theme_font_size_override("font_size", 22); hud.add_child(fps_label)
 	var mini := preload("res://scripts/minimap.gd").new(); hud.add_child(mini); mini.setup(self, data)
 	carte = preload("res://scripts/carte.gd").new(); hud.add_child(carte); carte.setup(self, monde)
+	missions = preload("res://scripts/missions.gd").new(); add_child(missions); missions.setup(self, monde, hud)
 	var credit := Label.new(); credit.text = "Données : © OpenStreetMap · Google Open Buildings (CC BY 4.0)"; credit.add_theme_font_size_override("font_size", 13); credit.modulate = Color(1, 1, 1, 0.7)
 	credit.anchor_left = 1; credit.anchor_right = 1; credit.anchor_top = 1; credit.anchor_bottom = 1; credit.offset_left = -420; credit.offset_top = -24; hud.add_child(credit)
 	hint = Label.new(); hint.add_theme_font_size_override("font_size", 28); hint.add_theme_color_override("font_outline_color", Color.BLACK); hint.add_theme_constant_override("outline_size", 8)
