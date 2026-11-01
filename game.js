@@ -1043,7 +1043,7 @@ function buildChunk(gx, gz) {
     }
     const st = styleAt(x, z), bcx = pts.reduce((a, p) => a + p[0], 0) / pts.length, bcz = pts.reduce((a, p) => a + p[1], 0) / pts.length;
     if (big.some(o => Math.abs(bcx - o.cx) < o.size[0] * 0.6 && Math.abs(bcz - o.cz) < o.size[1] * 0.6)) continue;
-    if (kind !== 1 && (onStation(k, bcx, bcz) || pts.some(p => onStation(k, p[0], p[1], -3)))) continue; // la boutique OSM de la station : remplacee par la station
+    if (kind !== 1 && (onStation(k, bcx, bcz) || pts.some(p => onStation(k, p[0], p[1], -3)) || inEdifice(bcx, bcz))) continue; // la boutique OSM de la station : remplacee par la station
     { // mosque: OSM building tagged so, or footprint holding a mosque point -> one of the Blender mosques fitted to it
       const mp = mosqs.find(o => !o.model && !usedM.has(o) && bcx > o.cx - 60 && bcx < o.cx + 60 && bcz > o.cz - 60 && bcz < o.cz + 60 && (o.pts ? inPoly(bcx, bcz, o.pts) : inPoly(o.cx, o.cz, pts)));
       if (kind === 1 || mp) { if (mp) usedM.add(mp); const n = mosqueModel(mp && mp.name, Math.max(polyArea(pts), mp ? mp.area : 0)), f = fitOriented(n, obb(pts), mosqueCol(n));
@@ -1079,7 +1079,7 @@ function buildChunk(gx, gz) {
           const wAlong = real ? PROP_CFG[real].len : rand(7, 12), depth = real ? PROP_CFG[real].len * 0.8 : rand(8, 13), off = r.w / 2 + r.side + 0.8 + depth / 2;
           const cx = ax + ux * d - uz * off * s, cz = az + uz * d + ux * off * s;
           const ok = (() => { const okey = Math.round(cx / 6) + ',' + Math.round(cz / 6); if (occ.has(okey)) return false;
-            if (isWater(cx, cz) || roadOverlap(cx, cz) || inOpenLieu(cx, cz) || inSquare(cx, cz, squares) || onStation(k, cx, cz, 4)) return false;
+            if (isWater(cx, cz) || roadOverlap(cx, cz) || inOpenLieu(cx, cz) || inSquare(cx, cz, squares) || onStation(k, cx, cz, 4) || inEdifice(cx, cz, 6)) return false;
             for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1]]) { const hx = a * wAlong / 2, hz = b * depth / 2; if (roadOverlap(cx + ux * hx - uz * hz, cz + uz * hx + ux * hz)) return false; }
             for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) occ.add((Math.round(cx / 6) + a) + ',' + (Math.round(cz / 6) + b)); return true; })();
           if (!ok) continue;
@@ -1286,11 +1286,14 @@ function buildChunk(gx, gz) {
   const sl = sigGrid.get(k) || [];
   const tlObjs = [];
   for (const si of sl) { const s = signals[si]; tlObjs.push(makeTrafficLight(group, s)); }
+  for (const e of EDF.near.get(k) || []) flats.push([e.cx, e.cz, e.o ? Math.hypot(e.o.a, e.o.b) / 2 : 16]); // pas de dunes dans les stades ni autour des eglises
   const hgrid = buildTerrain(group, gx, gz, cols, flats);
   addServices(group, k, cols);
   addBRT(group, k);
+  addEdifices(group, k, cols);
   flushProps(group);
   clearBRTCorridor(group, k);
+  clearStadiums(group, k);
   scene.add(group);
   colliders.set(k, cols);
   return { k, group, tl: tlObjs, hgrid };
@@ -1653,6 +1656,83 @@ function updateBRT(dt) {
       if (b.s >= brtLen || b.s <= 0) { b.s = clamp(b.s, 0, brtLen); b.dir *= -1; b.wait = 20; } }
     const p = brtAt(b.s), near = Math.hypot(p.x - player.x, p.z - player.z) < 1200;
     if (near && !b.g) b.g = makeBrtBus(); if (b.g) { b.g.visible = near; b.g.position.set(p.x, 0.33, p.z); b.g.rotation.y = p.h + (b.dir < 0 ? Math.PI : 0); }
+  }
+}
+// ---------------- Stades et eglises (OpenStreetMap, tools/edifices.mjs -> edifices.js) ----------------
+const EDF = (() => {
+  const src = window.EDIFICES || { stades: [], eglises: [] }, all = [], byCell = new Map(), near = new Map();
+  const mk = (kind, name, flat) => { const pts = []; for (let i = 0; i < flat.length; i += 2) pts.push([flat[i], flat[i + 1]]); let cx = 0, cz = 0; for (const q of pts) { cx += q[0] / pts.length; cz += q[1] / pts.length; }
+    const xs = pts.map(q => q[0]), zs = pts.map(q => q[1]), e = { kind, name, pts, cx, cz, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs) };
+    e.o = pts.length > 2 ? obb(pts) : null; all.push(e);
+    const k = ckey(cellOf(cx), cellOf(cz)); (byCell.get(k) || byCell.set(k, []).get(k)).push(e);
+    for (let gx = cellOf(e.minx - 12); gx <= cellOf(e.maxx + 12); gx++) for (let gz = cellOf(e.minz - 12); gz <= cellOf(e.maxz + 12); gz++) { const kk = ckey(gx, gz); (near.get(kk) || near.set(kk, []).get(kk)).push(e); } };
+  for (const [n, f] of src.stades) mk('stade', n, f);
+  for (const [n, f] of src.eglises) mk('eglise', n, f);
+  return { all, byCell, near };
+})();
+// un point dans un stade ou sur une eglise (marge en metres ; les eglises connues par un point prennent 14 m)
+function inEdifice(x, z, m = 0) {
+  for (const e of EDF.near.get(ckey(cellOf(x), cellOf(z))) || []) {
+    if (e.pts.length < 3) { if (Math.hypot(x - e.cx, z - e.cz) < 14 + m) return true; continue; }
+    if (x < e.minx - m || x > e.maxx + m || z < e.minz - m || z > e.maxz + m) continue;
+    if (inPoly(x, z, e.pts)) return true;
+    if (m > 0) for (let i = 0; i < e.pts.length; i++) { const [ax, az] = e.pts[i], [bx, bz] = e.pts[(i + 1) % e.pts.length], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1); if (Math.hypot(x - ax - dx * t, z - az - dz * t) < m) return true; }
+  }
+  return false;
+}
+const edMat = { track: new THREE.MeshStandardMaterial({ color: 0xa8492f, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1 }), seatG: colMat(0x1e8c45), seatY: colMat(0xf2c230), seatR: colMat(0xc8282d),
+  concrete: new THREE.MeshStandardMaterial({ color: 0xc9c4ba, roughness: 0.9 }), roof: new THREE.MeshStandardMaterial({ color: 0xb04a32, roughness: 0.8 }), cream: new THREE.MeshStandardMaterial({ color: 0xf3ead8, roughness: 0.85 }),
+  lamp: new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2d0, emissiveIntensity: 0.6 }) };
+const grassPitchMat = pitchMat.clone(); grassPitchMat.color.set(0x5fae3e); // pelouse des stades
+const roofPrism = new THREE.CylinderGeometry(1, 1, 1, 3); roofPrism.rotateX(Math.PI / 2); roofPrism.rotateZ(Math.PI); // toit a deux pentes : triangle pointe en haut, long de z
+const pyramid = new THREE.ConeGeometry(1, 1, 4); pyramid.rotateY(Math.PI / 4);
+function addEdifices(group, k, cols) {
+  for (const e of EDF.byCell.get(k) || []) {
+    if (e.kind === 'stade' && e.o) addStadium(group, e);
+    else if (e.kind === 'eglise') addChurch(group, e, cols);
+  }
+}
+function addStadium(group, e) { // repere local : z le long du terrain (o.a), x en travers (o.b)
+  const o = e.o, g = new THREE.Group(); g.position.set(o.cx, 0, o.cz); g.rotation.y = Math.atan2(o.u[0], o.u[1]);
+  const L = o.a, W = o.b, big = L * W > 25000, pl = Math.min(105, L * 0.62), pw = Math.min(68, W * 0.6);
+  const tl = Math.min(L * 0.86, pl + 18), tw = Math.min(W * 0.86, pw + 16); // piste autour du terrain
+  const track = new THREE.Mesh(new THREE.PlaneGeometry(tw, tl), edMat.track); track.rotation.x = -Math.PI / 2; track.position.y = 0.1; track.receiveShadow = true; g.add(track);
+  const pitch = new THREE.Mesh(new THREE.PlaneGeometry(pw, pl), grassPitchMat); pitch.rotation.x = -Math.PI / 2; pitch.position.y = 0.22; pitch.receiveShadow = true; g.add(pitch);
+  // tribunes en gradins collees a la piste, qui montent vers l'exterieur (2 cotes pour les petits stades), sieges vert-jaune-rouge
+  const rows = big ? 7 : 3, seats = [edMat.seatG, edMat.seatY, edMat.seatR], d = 2.6;
+  const sides = [[Math.PI / 2, tw / 2 + 1, tl], [-Math.PI / 2, tw / 2 + 1, tl]]; if (big) sides.push([0, tl / 2 + 1, tw + 2 * rows * d], [Math.PI, tl / 2 + 1, tw + 2 * rows * d]);
+  sides.forEach(([th, r0, len], si) => { const sg = new THREE.Group(); sg.position.set(Math.sin(th) * r0, 0, Math.cos(th) * r0); sg.rotation.y = th; g.add(sg);
+    for (let r = 0; r < rows; r++) { const h = 1.6 * (r + 1); svPart(sg, svBox, edMat.concrete, 0, h / 2, r * d + d / 2, len, h, d); svPart(sg, svBox, seats[Math.floor(r / rows * 3) % 3], 0, h + 0.15, r * d + d / 2, len * 0.98, 0.3, d * 0.8, false); }
+    if (big && si === 0) svPart(sg, svBox, svMat.white, 0, rows * 1.6 + 4, rows * d * 0.7, len * 0.5, 0.4, rows * d * 0.7); }); // auvent de la tribune d'honneur
+  const ox = tw / 2 + rows * d + 3, oz = tl / 2 + rows * d + 3;
+  for (const [a, b] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { const mh = big ? 38 : 20, x = a * ox, z = b * oz; // mats d'eclairage
+    svPart(g, svCyl, svMat.grey, x, mh / 2, z, 0.5, mh, 0.5); const pnl = svPart(g, svBox, edMat.lamp, x - a * 0.5, mh, z - b * 0.5, 3.4, 2.2, 0.4, false); pnl.lookAt(g.localToWorld(new THREE.Vector3(0, 0, 0))); }
+  group.add(g);
+}
+function addChurch(group, e, cols) { // nef blanche, toit de tuiles a deux pentes, clocher et croix
+  let cx = e.cx, cz = e.cz, a = 24, b = 12, h = 0;
+  if (e.o) { a = Math.max(e.o.a, e.o.b); b = Math.min(e.o.a, e.o.b); cx = e.o.cx; cz = e.o.cz; h = e.o.a >= e.o.b ? Math.atan2(e.o.u[0], e.o.u[1]) : Math.atan2(e.o.v[0], e.o.v[1]); }
+  else { const f = facingRoad(cx, cz); h = f ? f.h : 0; }
+  a = clamp(a, 12, 80); b = clamp(b, 8, 40); const wall = clamp(b * 0.75, 6, 16), big = a * b > 1500, g = new THREE.Group(); g.position.set(cx, 0, cz); g.rotation.y = h;
+  svPart(g, svBox, edMat.cream, 0, wall / 2, 0, b, wall, a);
+  svPart(g, roofPrism, edMat.roof, 0, wall + b * 0.28, 0, b * 0.6, b * 0.58, a * 1.02);
+  for (const t of big ? [-b * 0.32, b * 0.32] : [0]) { const tw = big ? b * 0.28 : clamp(b * 0.4, 3.5, 6), th = wall + (big ? 18 : 10), tz = -a / 2 - tw * 0.3;
+    svPart(g, svBox, edMat.cream, t, th / 2, tz, tw, th, tw); svPart(g, svBox, svMat.dark, t, th - 2.5, tz - tw / 2 - 0.02, tw * 0.45, 2.2, 0.1, false);
+    svPart(g, pyramid, edMat.roof, t, th + tw * 0.55, tz, tw * 0.75, tw * 1.1, tw * 0.75);
+    svPart(g, svBox, svMat.dark, t, th + tw * 1.1 + 1.2, tz, 0.25, 2.6, 0.25); svPart(g, svBox, svMat.dark, t, th + tw * 1.1 + 1.6, tz, 1.4, 0.25, 0.25); }
+  svPart(g, svBox, svMat.wood, 0, 2.2, -a / 2 - 0.05, b * 0.22, 4.4, 0.2, false); // porte
+  group.add(g); addCol(cols, cx, cz, Math.min(a, b) / 2);
+}
+// dans un stade : rien du decor du quartier (arbres, maisons, etals) sur le terrain et les tribunes
+function clearStadiums(group, k) {
+  const list = (EDF.near.get(k) || []).filter(e => e.kind === 'stade'); if (!list.length) return;
+  const inS = (x, z) => list.some(e => x > e.minx && x < e.maxx && z > e.minz && z < e.maxz && inPoly(x, z, e.pts));
+  const m = new THREE.Matrix4(), v = new THREE.Vector3(), zero = new THREE.Matrix4().makeScale(0, 0, 0), box = new THREE.Box3(), size = new THREE.Vector3();
+  for (const o of [...group.children]) {
+    if (o.isInstancedMesh) { let ch = false; for (let i = 0; i < o.count; i++) { o.getMatrixAt(i, m); v.setFromMatrixPosition(m); if (inS(v.x, v.z)) { o.setMatrixAt(i, zero); ch = true; } } if (ch) o.instanceMatrix.needsUpdate = true; continue; }
+    if (o.userData.brt || (o.position.x === 0 && o.position.z === 0)) continue;
+    box.setFromObject(o).getSize(size); if (Math.max(size.x, size.z) > 40) continue;
+    if (inS(o.position.x, o.position.z)) group.remove(o);
   }
 }
 // faire le plein : s'arreter sous l'auvent remplit la nitro et repare la voiture (1 500 FCFA)
