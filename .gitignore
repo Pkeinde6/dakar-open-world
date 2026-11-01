@@ -5,3 +5,4 @@ cle-google.js
 www/
 ios/
 package-lock.json
+*.apk
