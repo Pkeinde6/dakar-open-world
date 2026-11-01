@@ -1290,6 +1290,7 @@ function buildChunk(gx, gz) {
   addServices(group, k, cols);
   addBRT(group, k);
   flushProps(group);
+  clearBRTCorridor(group, k);
   scene.add(group);
   colliders.set(k, cols);
   return { k, group, tl: tlObjs, hgrid };
@@ -1597,7 +1598,7 @@ function addBRT(group, k) {
     // « BRT » peint tous les 120 m
     for (const i of ids) if (Math.floor(brtCum[i] / 120) !== Math.floor(brtCum[i + 1] / 120)) { const p = brtAt(Math.ceil(brtCum[i] / 120) * 120);
       const t = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.3), new THREE.MeshStandardMaterial({ map: signTex('BRT', '#6f6c69', '#ffffff', 256, 128), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
-      t.rotation.set(-Math.PI / 2, 0, -p.h + Math.PI); t.position.set(p.x, 0.35, p.z); group.add(t); }
+      t.rotation.set(-Math.PI / 2, 0, -p.h + Math.PI); t.position.set(p.x, 0.35, p.z); t.userData.brt = true; group.add(t); }
   }
   for (const st of brtStGrid.get(k) || []) { // station : quai sureleve, abri vitre, nom
     const g = new THREE.Group(); g.position.set(st.x, 0, st.z); g.rotation.y = st.h;
@@ -1608,6 +1609,26 @@ function addBRT(group, k) {
     const nm = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.8), new THREE.MeshStandardMaterial({ map: signTex(`BRT · ${(st.n || 'Station').toUpperCase()}`, '#0a4ea2', '#ffffff', 768, 112), roughness: 0.5, side: THREE.DoubleSide }));
     nm.position.set(4.1, 3.3, 0); nm.rotation.y = -Math.PI / 2; g.add(nm);
     group.add(g);
+  }
+}
+// enleve du couloir les petits objets du quartier (etals, parasols, herbes, arbres) : la voie est reservee aux bus
+function brtDist(x, z, k) {
+  let d = 1e9; const gx = Math.floor(k / 10000) - 4000, gz = (k % 10000) - 4000;
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const i of brtSegs.get(ckey(gx + a, gz + b)) || []) {
+    const [ax, az] = BRT.line[i], [bx, bz] = BRT.line[i + 1], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1);
+    d = Math.min(d, Math.hypot(x - ax - dx * t, z - az - dz * t)); }
+  return d;
+}
+function clearBRTCorridor(group, k) {
+  const gx = Math.floor(k / 10000) - 4000, gz = (k % 10000) - 4000; let any = false;
+  for (let a = -1; a <= 1 && !any; a++) for (let b = -1; b <= 1; b++) if (brtSegs.has(ckey(gx + a, gz + b))) { any = true; break; }
+  if (!any) return;
+  const m = new THREE.Matrix4(), v = new THREE.Vector3(), zero = new THREE.Matrix4().makeScale(0, 0, 0), box = new THREE.Box3(), size = new THREE.Vector3();
+  for (const o of [...group.children]) {
+    if (o.isInstancedMesh) { let ch = false; for (let i = 0; i < o.count; i++) { o.getMatrixAt(i, m); v.setFromMatrixPosition(m); if (brtDist(v.x, v.z, k) < 5) { o.setMatrixAt(i, zero); ch = true; } } if (ch) o.instanceMatrix.needsUpdate = true; continue; }
+    if (o.userData.brt || (o.position.x === 0 && o.position.z === 0)) continue; // marquages BRT, maillages fusionnes du quartier
+    box.setFromObject(o).getSize(size); if (Math.max(size.x, size.z) > 14) continue;
+    if (brtDist(o.position.x, o.position.z, k) < 5) group.remove(o);
   }
 }
 // bus articules electriques : ils font l'aller-retour et marquent l'arret a chaque station
@@ -1622,7 +1643,7 @@ function makeBrtBus() {
 }
 function updateBRT(dt) {
   if (!brtLen) return;
-  if (!brtBuses.length) for (let i = 0; i < 6; i++) brtBuses.push({ s: brtLen * (i + 0.5) / 6, dir: i % 2 ? 1 : -1, wait: 0, g: null });
+  if (!brtBuses.length) for (let i = 0; i < 18; i++) brtBuses.push({ s: brtLen * (i + 0.5) / 18, dir: i % 2 ? 1 : -1, wait: (i * 7) % 12, g: null }); // ~1 bus par km dans chaque sens
   for (const b of brtBuses) {
     if (b.wait > 0) b.wait -= dt;
     else { const next = brtStations.find(st => b.dir > 0 ? st.s > b.s + 0.5 : false) || (b.dir < 0 ? [...brtStations].reverse().find(st => st.s < b.s - 0.5) : null);
@@ -1630,7 +1651,7 @@ function updateBRT(dt) {
       const ns = b.s + b.dir * v * dt;
       if (next && (b.dir > 0 ? ns >= next.s : ns <= next.s)) { b.s = next.s; b.wait = 12; } else b.s = ns;
       if (b.s >= brtLen || b.s <= 0) { b.s = clamp(b.s, 0, brtLen); b.dir *= -1; b.wait = 20; } }
-    const p = brtAt(b.s), near = Math.hypot(p.x - player.x, p.z - player.z) < 700;
+    const p = brtAt(b.s), near = Math.hypot(p.x - player.x, p.z - player.z) < 1200;
     if (near && !b.g) b.g = makeBrtBus(); if (b.g) { b.g.visible = near; b.g.position.set(p.x, 0.33, p.z); b.g.rotation.y = p.h + (b.dir < 0 ? Math.PI : 0); }
   }
 }
