@@ -1,0 +1,67 @@
+# Compile la version Godot de Dakar Open World (dossier godot/) pour iPhone sur un Mac de Codemagic,
+# puis l'envoie sur TestFlight : installation sur iPhone sans passer par l'App Store.
+#
+# Cote Codemagic : l'integration App Store Connect « Rangu Codemagic » (la meme que Rangu, meme compte Apple),
+# et un profil de distribution App Store pour com.rangu.dakarOpenWorld (Team settings > Code signing identities >
+# iOS provisioning profiles > Fetch). Rien de secret dans le depot.
+# Lancement : une etiquette `jeu-ios-…` poussee sur GitHub, ou « Start new build » sur codemagic.io.
+workflows:
+  jeu-ios:
+    name: Jeu iOS TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'jeu-ios-*'
+          include: true
+    integrations:
+      app_store_connect: Rangu Codemagic
+    environment:
+      vars:
+        GODOT: 4.7.2-stable
+        BUNDLE_ID: com.rangu.dakarOpenWorld
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.rangu.dakarOpenWorld
+    scripts:
+      - name: Godot et modeles d'export
+        script: |
+          base=https://github.com/godotengine/godot-builds/releases/download/$GODOT
+          curl -sSL -o godot.zip $base/Godot_v${GODOT}_macos.universal.zip && unzip -q godot.zip
+          curl -sSL -o modeles.tpz $base/Godot_v${GODOT}_export_templates.tpz && unzip -q modeles.tpz
+          dest="$HOME/Library/Application Support/Godot/export_templates/${GODOT/-/.}"
+          mkdir -p "$dest" && mv templates/* "$dest/"
+          echo "GODOT_BIN=$PWD/Godot.app/Contents/MacOS/Godot" >> $CM_ENV
+      - name: Profils de signature
+        script: xcode-project use-profiles
+      # Godot ecrit un projet Xcode ; l'equipe et le profil viennent du profil installe par Codemagic
+      - name: Export Godot vers Xcode
+        script: |
+          profil=$(ls "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision | head -1)
+          security cms -D -i "$profil" > /tmp/profil.plist
+          equipe=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' /tmp/profil.plist)
+          uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profil.plist)
+          sed -i '' "s/EQUIPE_APPLE/$equipe/; s/PROFIL_APPLE/$uuid/; s/^application\/version=.*/application\/version=\"$BUILD_NUMBER\"/" godot/export_presets.cfg
+          mkdir -p build/ios
+          "$GODOT_BIN" --headless --path godot --import || true
+          "$GODOT_BIN" --headless --path godot --export-release "iOS" ../build/ios/DakarOpenWorld.ipa
+          ls build/ios
+      - name: Compilation de l'IPA
+        script: |
+          xcode-project use-profiles --project build/ios/DakarOpenWorld.xcodeproj
+          xcode-project build-ipa --project build/ios/DakarOpenWorld.xcodeproj --scheme DakarOpenWorld
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+      email:
+        recipients:
+          - pkeinde6@gmail.com
+        notify:
+          success: true
+          failure: true
