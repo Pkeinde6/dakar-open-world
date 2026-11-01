@@ -5,7 +5,8 @@ varying vec3 wpos;
 varying vec3 wnorm;
 varying vec3 tint;
 varying vec3 shutter;
-void vertex() { tint = COLOR.rgb; shutter = mix(vec3(0.18, 0.42, 0.28), vec3(0.17, 0.32, 0.55), step(0.5, fract(COLOR.a * 7.0))); wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; wnorm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz); }
+void vertex() { tint = pow(COLOR.rgb, vec3(2.2)); // couleur de sommet en sRGB -> lineaire, sinon tout parait delave
+	 shutter = mix(vec3(0.18, 0.42, 0.28), vec3(0.17, 0.32, 0.55), step(0.5, fract(COLOR.a * 7.0))); wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; wnorm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz); }
 void fragment() {
 	float along = abs(wnorm.x) > abs(wnorm.z) ? wpos.z : wpos.x;
 	vec3 tx = texture(plaster, vec2(along, wpos.y) / 2.0).rgb;
@@ -25,6 +26,11 @@ void fragment() {
 			}
 		}
 		if (cell.y > 0.27 && cell.y < 0.3 && cell.x > 0.25 && cell.x < 0.75) col = base * 1.15; // appui
+		float bay = floor(along / 3.5); bool balcon = floor_i > 0.5 && mod(bay + floor_i, 3.0) < 0.5; // un balcon sur trois, en quinconce
+		if (balcon && cell.y < 0.3 && cell.y > 0.06 && cell.x > 0.2 && cell.x < 0.8) { col = vec3(0.07); rough = 0.5; if (fract(along * 9.0) > 0.25 && cell.y > 0.1) col = base * 0.6; } // garde-corps en fer
+		if (cell.y < 0.05 && floor_i > 0.5) col = base * 1.25; // corniche claire a chaque etage
+		if (wpos.y < 0.6) col = base * 0.55; // soubassement plus fonce (poussiere, eclaboussures)
+		col = mix(col, col * vec3(0.85, 0.78, 0.68), smoothstep(1.5, 0.0, wpos.y) * 0.5); // salissure de sable en bas
 	}
 	ALBEDO = col; ROUGHNESS = rough; METALLIC = metal;
 }

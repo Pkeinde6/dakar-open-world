@@ -74,7 +74,7 @@ func _environment() -> void:
 	env.ssao_enabled = false; env.ssil_enabled = false # trop lourds pour une puce integree
 	env.glow_enabled = true; env.glow_intensity = 0.4
 	env.fog_enabled = true; env.fog_light_color = Color("e8dcc8"); env.fog_density = 0.0004; env.fog_aerial_perspective = 0.15
-	env.adjustment_enabled = true; env.adjustment_saturation = 1.08
+	env.adjustment_enabled = true; env.adjustment_saturation = 1.18
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
 	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-38, -35, 0); sun.light_energy = 2.2; sun.light_color = Color("fff2dc")
 	sun.shadow_enabled = true; sun.directional_shadow_max_distance = 110; sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS; add_child(sun)
