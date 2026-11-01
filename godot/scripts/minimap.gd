@@ -10,7 +10,7 @@ var data: Dictionary
 func setup(m: Node3D, d: Dictionary) -> void:
 	main = m; data = d
 	anchor_top = 1.0; anchor_bottom = 1.0; offset_left = 16; offset_top = -SIZE - 16; offset_right = 16 + SIZE; offset_bottom = -16
-	custom_minimum_size = Vector2(SIZE, SIZE)
+	custom_minimum_size = Vector2(SIZE, SIZE); clip_contents = true # rien ne deborde du cadre
 
 func _process(_dt: float) -> void: queue_redraw()
 
