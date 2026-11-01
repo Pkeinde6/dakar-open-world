@@ -19,6 +19,10 @@ var occupied := {} # cellules de 4 m prises par un batiment, une station : pas d
 var junctions := {} # noeud (arrondi au metre) -> nombre de routes qui s'y croisent
 var concrete: StandardMaterial3D
 var fps_label: Label
+var water: StandardMaterial3D
+var lamp_glow: StandardMaterial3D
+var clock := 0.0
+var ville
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -31,11 +35,19 @@ func _ready() -> void:
 	for r in data.roads:
 		for e in [r.pts[0], r.pts[-1]]:
 			var k := "%d,%d" % [roundi(e[0]), roundi(e[1])]; junctions[k] = junctions.get(k, 0) + 1
+	ville = preload("res://scripts/ville.gd").new(self, data)
 	_roads()
+	ville.sea()
+	ville.mosques()
 	_buildings()
+	ville.squares()
+	ville.markets()
+	ville.schools()
 	_fuel_stations()
 	_billboards()
+	ville.furniture()
 	_greenery()
+	ville.flush_models()
 	car = preload("res://scripts/car.gd").new(); add_child(car); car.setup("res://models/corolla_roues.glb", Color("f2c200"))
 	var sp := _spawn_point(); car.global_position = sp.origin + Vector3(0, 0.6, 0); car.global_basis = sp.basis
 	avatar = preload("res://scripts/avatar.gd").new(); add_child(avatar)
@@ -85,7 +97,7 @@ func _p3(r: Dictionary, i: int, lift := 0.0) -> Vector3:
 	return Vector3(r.pts[i][0], y, r.pts[i][1])
 
 # ribbon from offset o0 to o1 (metres from the centre line), at height dy above the road profile
-func _band(st: SurfaceTool, r: Dictionary, o0: float, o1: float, dy: float, only_up := false, only_flat := false, up := true) -> void:
+func _band(st: SurfaceTool, r: Dictionary, o0: float, o1: float, dy: float, only_up := false, only_flat := false, up := true, clip := false) -> void:
 	for i in r.pts.size() - 1:
 		var a := _p3(r, i, dy); var b := _p3(r, i + 1, dy)
 		var hi := maxf(a.y, b.y) - dy
@@ -93,6 +105,9 @@ func _band(st: SurfaceTool, r: Dictionary, o0: float, o1: float, dy: float, only
 		if only_flat and hi > 0.3: continue
 		var d := Vector3(b.x - a.x, 0, b.z - a.z); if d.length() < 0.01: continue
 		var n := Vector3(-d.z, 0, d.x).normalized()
+		if clip: # trottoir : rien sur la chaussee d'une autre rue (carrefours, rues paralleles)
+			var mid := (a + b) / 2.0 + n * (o0 + o1) / 2.0
+			if ville.on_road(Vector2(mid.x, mid.z), 0.2, r) or ville.on_road(Vector2(a.x + n.x * o1, a.z + n.z * o1), 0.0, r) or ville.on_road(Vector2(b.x + n.x * o1, b.z + n.z * o1), 0.0, r): continue
 		var q := [a + n * o0, b + n * o0, b + n * o1, a + n * o1]
 		for k in ([0, 1, 2, 0, 2, 3] if up else [0, 2, 1, 0, 3, 2]): st.add_vertex(q[k])
 
@@ -118,7 +133,7 @@ func _roads() -> void:
 		_band(road, r, -hw, hw, 0.05)
 		# trottoirs (seulement au sol), bordure surelevee de 15 cm
 		if r.side > 0.5 and r.t != 0:
-			_band(walk, r, hw, hw + r.side, 0.2, false, true); _band(walk, r, -hw - r.side, -hw, 0.2, false, true)
+			_band(walk, r, hw, hw + r.side, 0.2, false, true, true, true); _band(walk, r, -hw - r.side, -hw, 0.2, false, true, true, true)
 			_wall(walk, r, hw, 0.05, 0.2, false); _wall(walk, r, -hw, 0.05, 0.2, false)
 		# tablier : dessous et rives en beton, glissieres en beton (type New Jersey) sur les ponts et l'autoroute
 		_band(deck, r, -hw - 0.4, hw + 0.4, -0.9, true, false, false)
@@ -195,12 +210,19 @@ func _crossings(st: SurfaceTool, r: Dictionary) -> void:
 func _buildings() -> void:
 	var m := ShaderMaterial.new(); m.shader = load("res://shaders/facade.gdshader"); m.set_shader_parameter("plaster", load("res://textures/worn_plaster_wall_diff.jpg"))
 	var cells := {}; var rng := RandomNumberGenerator.new(); rng.seed = 221
-	for b in data.buildings:
+	for bi in data.buildings.size():
+		var b: Dictionary = data.buildings[bi]
 		var pts := PackedVector2Array()
 		for p in b.pts: pts.append(Vector2(p[0], p[1]))
 		if pts.size() < 3 or absf(_area(pts)) < 15: continue
-		var h: float = b.h if b.h > 0 else 3.1 * rng.randi_range(1, 4)
-		var col: Color = Color("f4f1ea") if b.mosque else PAL[rng.randi() % PAL.size()]; col.a = rng.randf()
+		var bb0 := Rect2(pts[0], Vector2.ZERO)
+		for p in pts: bb0 = bb0.expand(p)
+		for x in range(floori(bb0.position.x / 4), floori(bb0.end.x / 4) + 1):
+			for z in range(floori(bb0.position.y / 4), floori(bb0.end.y / 4) + 1): occupied[Vector2i(x, z)] = true
+		var look: Dictionary = ville.building_look(bi, b, pts)
+		if look.get("skip", false): continue
+		var h: float = look.h
+		var col: Color = Color("f4f1ea") if b.mosque else look.col; col.a = rng.randf()
 		var key := Vector2i(floori(pts[0].x / 250.0), floori(pts[0].y / 250.0))
 		if not cells.has(key):
 			var nst := SurfaceTool.new(); nst.begin(Mesh.PRIMITIVE_TRIANGLES); cells[key] = nst
@@ -317,10 +339,11 @@ func _greenery() -> void:
 		for p in poly: pts.append(Vector2(p[0], p[1]))
 		var tri := Geometry2D.triangulate_polygon(pts)
 		if tri.is_empty(): continue
-		var st := SurfaceTool.new(); st.begin(Mesh.PRIMITIVE_TRIANGLES); var flip := _area(pts) > 0
-		for k in range(0, tri.size(), 3):
-			for j in ([tri[k], tri[k + 2], tri[k + 1]] if flip else [tri[k], tri[k + 1], tri[k + 2]]): st.add_vertex(Vector3(pts[j].x, 0.04, pts[j].y))
-		st.generate_normals(); _static(st.commit(), gm, false)
+		if poly in data.parks:
+			var st := SurfaceTool.new(); st.begin(Mesh.PRIMITIVE_TRIANGLES); var flip := _area(pts) > 0
+			for k in range(0, tri.size(), 3):
+				for j in ([tri[k], tri[k + 2], tri[k + 1]] if flip else [tri[k], tri[k + 1], tri[k + 2]]): st.add_vertex(Vector3(pts[j].x, 0.04, pts[j].y))
+			st.generate_normals(); _static(st.commit(), gm, false)
 		var bb := Rect2(pts[0], Vector2.ZERO)
 		for p in pts: bb = bb.expand(p)
 		for n in int(clamp(absf(_area(pts)) / 120.0, 2, 120)):
@@ -363,12 +386,20 @@ func _forest(path: String, spots: Array, rng: RandomNumberGenerator, trunk_r: fl
 	for i in mesh.get_surface_count(): # feuilles : texture decoupee (alpha), visibles des deux cotes
 		var sm := mesh.surface_get_material(i)
 		if sm and sm.resource_name.begins_with("Feuilles"): mesh.surface_set_material(i, _leaf_mat())
-	var mm := MultiMesh.new(); mm.transform_format = MultiMesh.TRANSFORM_3D; mm.mesh = mesh; mm.instance_count = spots.size()
-	for i in spots.size():
-		var s := rng.randf_range(0.8, 1.25) * (0.62 if path.contains("neem") else 1.0); var q: Vector2 = spots[i] # neems de rue : 6-7 m
-		mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s)), Vector3(q.x, 0, q.y)))
-		var body := StaticBody3D.new(); var cs := CollisionShape3D.new(); var sh := CylinderShape3D.new(); sh.radius = trunk_r * s; sh.height = 3; cs.shape = sh; cs.position.y = 1.5; body.add_child(cs); body.position = Vector3(q.x, 0, q.y); add_child(body)
-	var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.visibility_range_end = 260.0; mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON; add_child(mi)
+	var cells := {} # arbres groupes par carre de 200 m : seuls les proches sont dessines (feuilles = beaucoup de triangles)
+	for q in spots:
+		var key := Vector2i(floori(q.x / 200.0), floori(q.y / 200.0))
+		if not cells.has(key): cells[key] = []
+		cells[key].append(q)
+	for key in cells:
+		var list: Array = cells[key]
+		var mm := MultiMesh.new(); mm.transform_format = MultiMesh.TRANSFORM_3D; mm.mesh = mesh; mm.instance_count = list.size()
+		for j2 in list.size():
+			var s := rng.randf_range(0.8, 1.25) * (0.62 if path.contains("neem") else 1.0); var q: Vector2 = list[j2] # neems de rue : 6-7 m
+			mm.set_instance_transform(j2, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s)), Vector3(q.x, 0, q.y)))
+			var body := StaticBody3D.new(); var cs := CollisionShape3D.new(); var sh := CylinderShape3D.new(); sh.radius = trunk_r * s; sh.height = 3; cs.shape = sh; cs.position.y = 1.5; body.add_child(cs); body.position = Vector3(q.x, 0, q.y); add_child(body)
+		mm.custom_aabb = AABB(Vector3(key.x * 200.0 - 20, -2, key.y * 200.0 - 20), Vector3(240, 30, 240))
+		var mi := MultiMeshInstance3D.new(); mi.multimesh = mm; mi.visibility_range_end = 280.0; add_child(mi)
 	scn.queue_free()
 
 var _leaf: StandardMaterial3D
@@ -490,6 +521,8 @@ func _process(dt: float) -> void:
 	cam.look_at(look)
 	frames += 1
 	fps_label.text = "%d images/s" % Engine.get_frames_per_second()
+	clock += dt; ville.tick_lights(clock)
+	if water: water.uv1_offset += Vector3(dt * 0.02, 0, dt * 0.012) # vagues qui glissent
 	if frames == 600: print("FPS ", Engine.get_frames_per_second())
 	if capture != "" and frames == 120:
 		get_viewport().get_texture().get_image().save_png(capture); get_tree().quit()
@@ -515,5 +548,13 @@ func _capture_view() -> Array:
 			for c in get_children():
 				if c is Node3D and c.has_meta("pub"):
 					return [c.global_position + c.global_basis.z * 18 + Vector3.UP * 3, c.global_position + Vector3.UP * 7.5]
+		"mer":
+			for p in data.coast:
+				if Vector2(p[0], p[1]).length() < 900: return [Vector3(p[0], 0, p[1]) + Vector3(60, 25, 60), Vector3(p[0], 0, p[1])]
+		"marche":
+			for mk in data.markets:
+				if mk.name.contains("Sandaga"): return [Vector3(mk.pts[0][0], 0, mk.pts[0][1]) + Vector3(-25, 14, -25), Vector3(mk.pts[0][0], 0, mk.pts[0][1])]
+		"mosquee":
+			var q = data.mosques[0]; return [Vector3(q.x, 0, q.z) + Vector3(-35, 12, -35), Vector3(q.x, 5, q.z)]
 		"ciel": return [avatar.global_position + Vector3(-160, 140, -160), avatar.global_position]
 	return [avatar.global_position + Vector3(-2.2, 1.7, -3.2), avatar.global_position + Vector3.UP * 1.1]
