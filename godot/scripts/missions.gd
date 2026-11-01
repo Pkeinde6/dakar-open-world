@@ -14,6 +14,7 @@ var main: Node3D
 var quartiers := [] # [nom, x, z]
 var nodes := {} # "x,z" -> Vector2 ; graphe des rues principales pour le GPS
 var adj := {} # "x,z" -> [[voisin, longueur]]
+var ngrid := {} # carre de 100 m -> noeuds, pour trouver la rue la plus proche sans tout parcourir
 var money := 2000
 var done := 0
 var stage := "none" # none, pickup, carry
@@ -38,6 +39,8 @@ func setup(m: Node3D, monde: Dictionary, hud: CanvasLayer) -> void:
 		var prev := ""
 		for i in range(1, r.size(), 2):
 			var k := "%d,%d" % [r[i], r[i + 1]]; nodes[k] = Vector2(r[i], r[i + 1])
+			var gk := Vector2i(floori(r[i] / 100.0), floori(r[i + 1] / 100.0)); if not ngrid.has(gk): ngrid[gk] = []
+			ngrid[gk].append(k)
 			if not adj.has(k): adj[k] = []
 			if prev != "": var L: float = nodes[k].distance_to(nodes[prev]); adj[k].append([prev, L]); adj[prev].append([k, L])
 			prev = k
@@ -76,10 +79,15 @@ func _unhandled_input(e: InputEvent) -> void:
 	if not started and e is InputEventKey and e.pressed and e.keycode in [KEY_ENTER, KEY_KP_ENTER]: started = true; card.visible = false; _new_mission()
 
 func _nearest_node(p: Vector2) -> String:
-	var best := ""; var bd := 1e18
-	for k in nodes:
-		var d: float = nodes[k].distance_squared_to(p)
-		if d < bd: bd = d; best = k
+	var best := ""; var bd := 1e18; var c := Vector2i(floori(p.x / 100.0), floori(p.y / 100.0))
+	for ring in 6: # on elargit jusqu'a trouver une rue
+		for a in range(-ring, ring + 1):
+			for b in range(-ring, ring + 1):
+				if maxi(absi(a), absi(b)) != ring: continue
+				for k in ngrid.get(c + Vector2i(a, b), []):
+					var d: float = nodes[k].distance_squared_to(p)
+					if d < bd: bd = d; best = k
+		if best != "": return best
 	return best
 
 func _spot(from: Vector2, dmin: float, dmax: float) -> Dictionary: # un point de rue (et son quartier) a bonne distance
@@ -106,7 +114,7 @@ func _new_mission() -> void:
 	pick = {"p": pk.p, "name": nm}; stage = "pickup"; _target(pick.p)
 	say("", "Client à %s — suis le marquage violet" % pick.name)
 
-func _target(p: Vector2) -> void: marker.visible = true; marker.global_position = Vector3(p.x, 0, p.y); route_t = 0.0
+func _target(p: Vector2) -> void: marker.visible = true; marker.global_position = Vector3(p.x, 0, p.y); route_t = 0.0; path = PackedVector2Array()
 
 func _player_pos() -> Vector2:
 	var pl: Node3D = main.car if main.driving else main.avatar
@@ -116,21 +124,38 @@ func _player_pos() -> Vector2:
 func _route(a: Vector2, b: Vector2) -> PackedVector2Array:
 	var s := _nearest_node(a); var g := _nearest_node(b); var out := PackedVector2Array()
 	if s == "" or g == "": return out
-	var open := {s: true}; var came := {}; var gs := {s: 0.0}; var fs := {s: nodes[s].distance_to(nodes[g])}; var it := 0
-	while not open.is_empty() and it < 40000:
-		it += 1; var cur := ""; var cf := 1e18
-		for k in open:
-			if fs[k] < cf: cf = fs[k]; cur = k
+	var heap := [[nodes[s].distance_to(nodes[g]), s]]; var came := {}; var gs := {s: 0.0}; var shut := {}; var it := 0
+	while not heap.is_empty() and it < 60000: # tas binaire : le noeud le plus prometteur en tete
+		it += 1; var top: Array = _pop(heap); var cur: String = top[1]
+		if shut.has(cur): continue
 		if cur == g: break
-		open.erase(cur)
+		shut[cur] = true
 		for e in adj.get(cur, []):
 			var ng: float = gs[cur] + e[1]
-			if ng < gs.get(e[0], 1e18): came[e[0]] = cur; gs[e[0]] = ng; fs[e[0]] = ng + nodes[e[0]].distance_to(nodes[g]); open[e[0]] = true
+			if ng < gs.get(e[0], 1e18): came[e[0]] = cur; gs[e[0]] = ng; _push(heap, [ng + nodes[e[0]].distance_to(nodes[g]), e[0]])
 	if not came.has(g) and s != g: out.append(a); out.append(b); return out
 	var k := g
 	while k != s: out.insert(0, nodes[k]); k = came[k]
 	out.insert(0, a); out.append(b)
 	return out
+
+func _push(h: Array, e: Array) -> void:
+	h.append(e); var i := h.size() - 1
+	while i > 0:
+		var p := (i - 1) >> 1
+		if h[p][0] <= h[i][0]: break
+		var t = h[p]; h[p] = h[i]; h[i] = t; i = p
+func _pop(h: Array) -> Array:
+	var top: Array = h[0]; var last: Array = h.pop_back()
+	if not h.is_empty():
+		h[0] = last; var i := 0
+		while true:
+			var l := 2 * i + 1; var r := l + 1; var m := i
+			if l < h.size() and h[l][0] < h[m][0]: m = l
+			if r < h.size() and h[r][0] < h[m][0]: m = r
+			if m == i: break
+			var t = h[m]; h[m] = h[i]; h[i] = t; i = m
+	return top
 
 func _draw_route(path: PackedVector2Array) -> void: # bande de 1,6 m au milieu de la route, sur les 700 premiers metres
 	var st := SurfaceTool.new(); st.begin(Mesh.PRIMITIVE_TRIANGLES); var run := 0.0
@@ -153,7 +178,16 @@ func _process(dt: float) -> void:
 	route_mat.uv1_offset.y -= dt * 0.8 # les chevrons avancent
 	var pl := _player_pos(); var tgt: Vector2 = pick.p if stage == "pickup" else drop.p
 	route_t -= dt
-	if route_t <= 0: route_t = 2.0; path = _route(pl, tgt); _draw_route(path)
+	if route_t <= 0: # itineraire calcule une fois ; on efface ce qui est parcouru ; nouveau calcul seulement hors route
+		route_t = 1.0
+		var off := 1e9; var cut := 0
+		for i in mini(path.size() - 1, 60):
+			var d := Geometry2D.get_closest_point_to_segment(pl, path[i], path[i + 1]).distance_to(pl)
+			if d < off: off = d; cut = i
+		if path.size() < 2 or off > 40.0: path = _route(pl, tgt)
+		else:
+			path = path.slice(cut); path[0] = pl
+		_draw_route(path)
 	var slow: bool = main.driving and main.car.linear_velocity.length() < 3.0
 	if pl.distance_to(tgt) < 9.0 and slow:
 		if stage == "pickup":
