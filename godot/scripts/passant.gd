@@ -9,10 +9,15 @@ var off := 0.0
 var speed := 1.2
 
 func setup(path: String, road: Dictionary, f: float, d: int) -> void:
-	var model: Node3D = load(path).instantiate(); add_child(model)
+	setup_node(load(path).instantiate(), road, f, d)
+
+# model already built (a Mixamo person dressed by main.gd): its walk is "mixamo_com", glTF figures have "Walk"
+func setup_node(model: Node3D, road: Dictionary, f: float, d: int) -> void:
+	add_child(model)
 	var anim: AnimationPlayer = model.find_child("AnimationPlayer", true, false)
-	if anim and anim.has_animation("Walk"):
-		anim.get_animation("Walk").loop_mode = Animation.LOOP_LINEAR; anim.play("Walk"); anim.seek(randf())
+	for n in ["Walk", "mixamo_com"]:
+		if anim and anim.has_animation(n):
+			anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR; anim.play(n); anim.seek(randf() * anim.get_animation(n).length); break
 	for p in road.pts: pts.append(Vector2(p[0], p[1]))
 	cum.append(0.0)
 	for i in range(1, pts.size()): cum.append(cum[i - 1] + pts[i].distance_to(pts[i - 1]))
@@ -25,5 +30,5 @@ func _process(dt: float) -> void:
 	while i < cum.size() - 2 and cum[i + 1] < s: i += 1
 	var a := pts[i]; var b := pts[i + 1]; var t := (s - cum[i]) / maxf(0.01, cum[i + 1] - cum[i])
 	var p := a.lerp(b, t); var d := (b - a).normalized(); var n := Vector2(-d.y, d.x)
-	position = Vector3(p.x + n.x * off, 0.03, p.y + n.y * off)
+	position = Vector3(p.x + n.x * off, 0.2, p.y + n.y * off) # sur le trottoir
 	rotation.y = atan2(d.x, d.y) if dir > 0 else atan2(-d.x, -d.y)

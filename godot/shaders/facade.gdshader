@@ -1,11 +1,11 @@
 // Facades de Dakar : enduit (texture scannee) teinte par batiment, fenetres a grille et volets tous les 3,5 m x 3,1 m
 shader_type spatial;
 uniform sampler2D plaster : source_color, filter_linear_mipmap, repeat_enable;
-uniform vec3 tint : source_color = vec3(0.92, 0.85, 0.7);
-uniform vec3 shutter : source_color = vec3(0.25, 0.45, 0.35);
 varying vec3 wpos;
 varying vec3 wnorm;
-void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; wnorm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz); }
+varying vec3 tint;
+varying vec3 shutter;
+void vertex() { tint = COLOR.rgb; shutter = mix(vec3(0.18, 0.42, 0.28), vec3(0.17, 0.32, 0.55), step(0.5, fract(COLOR.a * 7.0))); wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; wnorm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz); }
 void fragment() {
 	float along = abs(wnorm.x) > abs(wnorm.z) ? wpos.z : wpos.x;
 	vec3 tx = texture(plaster, vec2(along, wpos.y) / 2.0).rgb;
