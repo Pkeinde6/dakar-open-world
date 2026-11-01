@@ -20,4 +20,5 @@ for (const p of JSON.parse(fs.readFileSync(src, 'utf8'))) {
 }
 const dir = new URL('../batiments/', import.meta.url); fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir);
 let bytes = 0; for (const [k, v] of out) { const t = JSON.stringify(v); bytes += t.length; fs.writeFileSync(new URL(`${k}.json`, dir), t); }
+fs.writeFileSync(new URL('liste.json', dir), JSON.stringify([...out.keys()])); // pour le telechargement hors ligne du site
 console.log('ajoutes', added, 'deja dans OSM', dup, 'fichiers', out.size, 'Mo', (bytes / 1e6).toFixed(1));

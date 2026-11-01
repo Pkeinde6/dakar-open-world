@@ -2716,6 +2716,39 @@ function togglePause(on = !paused) {
 }
 $('resume').onclick = () => togglePause(false);
 
+// ---------------- Hors ligne (sw.js garde les fichiers sur l'appareil) ----------------
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => { });
+const OFF_KEY = 'dow-offline';
+function offlineLabel() {
+  let ok = null; try { ok = localStorage.getItem(OFF_KEY); } catch (e) { }
+  $('offline').textContent = ok ? 'Hors ligne : mettre à jour' : 'Jouer hors ligne';
+  $('offtxt').textContent = !navigator.onLine ? 'Pas de réseau : tu joues avec Dakar gardé sur l’appareil.'
+    : ok ? `Dakar est gardé sur l’appareil (${new Date(+ok).toLocaleDateString('fr')}).` : 'Télécharge Dakar une fois (≈ 150 Mo) pour jouer sans réseau.';
+}
+async function downloadOffline() {
+  const btn = $('offline'); if (btn.disabled || !('caches' in window)) return; btn.disabled = true;
+  try { await navigator.storage?.persist?.(); } catch (e) { } // pour que le telephone ne vide pas le cache
+  const abs = (u) => new URL(u, location.href).href;
+  // tout ce que le jeu a deja charge (modeles, textures, bibliotheques), les ciels des autres ambiances et tous les carres de batiments
+  const urls = new Set(performance.getEntriesByType('resource').map(e => e.name).filter(u => /^https?:/.test(u) && !/cle-google|tile\.googleapis|\/sw\.js/.test(u)));
+  ['./', 'index.html', 'manifest.webmanifest', 'icones/icone-180.png', 'icones/icone-192.png', 'icones/icone-512.png', 'textures/menu.jpg', 'batiments/liste.json'].forEach(u => urls.add(abs(u)));
+  for (const m of MODES) urls.add(abs(`textures/${m.hdr}.hdr`));
+  try { for (const k of await (await fetch('batiments/liste.json')).json()) urls.add(abs(`batiments/${k}.json`)); } catch (e) { }
+  const c = await caches.open('dow-1'), have = new Set((await c.keys()).map(r => r.url));
+  const list = [...urls].filter(u => !have.has(u)), total = list.length; let done = 0, fail = 0;
+  const work = async () => {
+    while (list.length) { const u = list.pop();
+      try { const r = await fetch(u, { cache: 'no-cache' }); if (r.ok) await c.put(u, r); else if (r.status !== 404) fail++; } catch (e) { fail++; }
+      if (++done % 40 === 0 || done === total) $('offtxt').textContent = `Téléchargement de Dakar… ${Math.round(done / total * 100)} %`; }
+  };
+  await Promise.all(Array.from({ length: 12 }, work));
+  if (!fail) try { localStorage.setItem(OFF_KEY, Date.now()); } catch (e) { }
+  btn.disabled = false; offlineLabel();
+  if (fail) $('offtxt').textContent = `${fail} fichiers n’ont pas pu être téléchargés : relance quand le réseau est meilleur.`;
+}
+$('offline').onclick = downloadOffline;
+addEventListener('online', offlineLabel); addEventListener('offline', offlineLabel); offlineLabel();
+
 // ---------------- Mobile touch controls ----------------
 // Touch buttons feed the same `keys` map as the keyboard; one-shot actions replay their key as a keydown.
 if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) {
