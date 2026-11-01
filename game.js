@@ -61,6 +61,9 @@ const WIDTH = [11,  11,   10,   9.5, 9,    8,    7.5,  5.5,   5,    4,    7];
 const SIDEW = [0,   2.5,  3,    3,   2.5,  2,    2,    1,     1,    0,    0];
 const SPEED = [30,  23,   16,   14,  12,   8,    8,    5,     6,    7,    14];
 const DRIVABLE = t => t !== 9 || true;
+// largeur d'apres le nombre de voies OSM : voies de 3,6 m et bande d'arret d'urgence sur l'autoroute, 3,5 m sur les voies express
+const LANE_W = [3.6, 3.5, 3.3, 3.3, 3.2, 3, 3, 3, 3, 3, 3.5], LANE_EXTRA = [3.5, 1.5, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+const laneWidth = (t, ow, lanes) => clamp(Math.max(lanes, ow ? 1 : 2) * LANE_W[t] + LANE_EXTRA[t], 5, 22);
 const roads = [];
 for (const [t, ni, ow, lanes, flat, mw, ms] of D.roads) {
   const pts = []; let x = 0, z = 0;
@@ -73,7 +76,7 @@ for (const [t, ni, ow, lanes, flat, mw, ms] of D.roads) {
     pts.push([x, z]);
   }
   if (pts.length < 2) continue;
-  const w = mw ? mw / 10 : lanes ? clamp(lanes * 3.3 + 1, 5, 18) : WIDTH[t], side = ms ? Math.min(3.5, ms / 10) : SIDEW[t];
+  const w = mw ? mw / 10 : lanes ? laneWidth(t, ow, lanes) : WIDTH[t], side = ms ? Math.min(3.5, ms / 10) : SIDEW[t];
   const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
   roads.push({ t, name: ni >= 0 ? D.names[ni] : '', ow, w, side, pts, cum, len: cum[cum.length - 1] });
 }
@@ -2801,7 +2804,7 @@ function skipTravel() { // fast-forward a long regional trip
   if (lieu.length === 2 && lieu.every(Number.isFinite)) spawnAt(...ll(lieu[0], lieu[1]));
   else spawnAt(CITIES[1].p[0], CITIES[1].p[1]);
   if (url.has('cap')) player.h = THREE.MathUtils.degToRad(+url.get('cap'));
-  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, stations: STATIONS_OSM, elevAt, get chunks() { return chunks; } };
+  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, stations: STATIONS_OSM, elevAt, roads, get chunks() { return chunks; } };
   $('loadtxt').textContent = 'Prêt. Bienvenue à Dakar.';
   $('menubtns').style.display = 'flex'; $('start').focus();
   const go = () => { if ($('loading').style.display === 'none') return; $('loading').style.display = 'none'; document.body.classList.add('playing'); initAudio(); chapterCard();
