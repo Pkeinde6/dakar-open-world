@@ -1,7 +1,7 @@
 // Measures each street's real corridor (facade to facade) from the OSM building footprints,
 // then derives a carriageway width and sidewalk width. Writes them back into data.js as
 // roads[i][5] = carriageway (dm), roads[i][6] = sidewalk (dm); 0 = not measurable (use defaults).
-// usage: node tools/widths.mjs
+// usage: node tools/widths.mjs [open_buildings_dakar.json]
 import fs from 'fs';
 const file = new URL('../data.js', import.meta.url);
 const src = fs.readFileSync(file, 'utf8');
@@ -9,9 +9,9 @@ const D = JSON.parse(src.slice(src.indexOf('=') + 1).replace(/;\s*$/, ''));
 
 // building edges in a 50 m grid
 const CELL = 50, grid = new Map(), key = (gx, gz) => gx * 100000 + gz;
-for (const [, , flat] of D.buildings) {
-  const pts = []; let x = 0, z = 0;
-  for (let i = 0; i < flat.length; i += 2) { x += flat[i]; z += flat[i + 1]; pts.push([x, z]); }
+// + Google Open Buildings si on donne le fichier (node tools/widths.mjs <open_buildings_dakar.json>) : sept fois plus de facades
+const extra = process.argv[2] ? JSON.parse(fs.readFileSync(process.argv[2], 'utf8')) : [];
+for (const pts of [...D.buildings.map(([, , flat]) => { const p = []; let x = 0, z = 0; for (let i = 0; i < flat.length; i += 2) { x += flat[i]; z += flat[i + 1]; p.push([x, z]); } return p; }), ...extra]) {
   for (let i = 0; i < pts.length; i++) {
     const a = pts[i], b = pts[(i + 1) % pts.length];
     const gx0 = Math.floor(Math.min(a[0], b[0]) / CELL), gx1 = Math.floor(Math.max(a[0], b[0]) / CELL), gz0 = Math.floor(Math.min(a[1], b[1]) / CELL), gz1 = Math.floor(Math.max(a[1], b[1]) / CELL);

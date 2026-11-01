@@ -1455,7 +1455,27 @@ function updateChunks(px, pz) {
   for (let a = -R; a <= R; a++) for (let b = -R; b <= R; b++) { const k = ckey(gx + a, gz + b); if (want.has(k) && !chunks.has(k)) buildQueue.push([gx + a, gz + b, a * a + b * b]); }
   buildQueue.sort((p, q) => p[2] - q[2]);
 }
-function processQueue(n = 2) { for (let i = 0; i < n && buildQueue.length; i++) { const [gx, gz] = buildQueue.shift(); const k = ckey(gx, gz); if (!chunks.has(k)) chunks.set(k, buildChunk(gx, gz)); } }
+// batiments Google Open Buildings (tools/web_batiments.mjs) : telecharges carre par carre avant de construire le quartier
+const gobCells = new Map(); // ckey -> 'loading' | true
+const NO_GOB = new URLSearchParams(location.search).has('osm');
+function needGob(gx, gz) {
+  if (NO_GOB) return false; // ?osm dans l'adresse : seulement les batiments OpenStreetMap (plus leger)
+  const k = ckey(gx, gz), st = gobCells.get(k); if (st === true) return false; if (st) return true;
+  gobCells.set(k, 'loading');
+  fetch(`batiments/${gx}_${gz}.json`).then(r => r.ok ? r.json() : []).catch(() => []).then(list => {
+    let a = bGrid.get(k); if (!a) bGrid.set(k, a = []);
+    for (const b of list) { a.push(D.buildings.length); D.buildings.push(b); }
+    gobCells.set(k, true);
+  });
+  return true;
+}
+function processQueue(n = 2) {
+  for (let i = 0, tries = 0; i < n && buildQueue.length && tries < buildQueue.length + n; tries++) {
+    const item = buildQueue.shift(), [gx, gz] = item, k = ckey(gx, gz); if (chunks.has(k)) continue;
+    if (needGob(gx, gz)) { buildQueue.push(item); continue; } // ses batiments arrivent : on construira au prochain tour
+    chunks.set(k, buildChunk(gx, gz)); i++;
+  }
+}
 
 // landmarks
 const landmarkObjs = [];
