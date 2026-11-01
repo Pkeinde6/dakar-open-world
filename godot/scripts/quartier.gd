@@ -4,6 +4,7 @@ extends Node3D
 
 var key := ""
 var rect := Rect2() # emprise de la tuile en metres
+var neighbours := [] # batiments des tuiles voisines : leur terrain est pris, rien ne se pose dessus
 
 # d : la tuile (godot/data/tuiles/x_z.json) ; ctx : les routes des 8 tuiles voisines (pour les tests de proximite au bord)
 func build(d: Dictionary, ctx: Array, tx: int, tz: int, size: float) -> void:
@@ -17,6 +18,12 @@ func build(d: Dictionary, ctx: Array, tx: int, tz: int, size: float) -> void:
 		for e in [[0, r.endA], [r.pts.size() - 1, r.endB]]:
 			if not e[1]: continue
 			var p = r.pts[e[0]]; var k := "%d,%d" % [roundi(p[0]), roundi(p[1])]; junctions[k] = junctions.get(k, 0) + 1
+	for b in neighbours: # au bord de la tuile, le terrain des batiments voisins est occupe
+		var mn := Vector2(1e9, 1e9); var mx := Vector2(-1e9, -1e9)
+		for p in b.pts: mn = mn.min(Vector2(p[0], p[1])); mx = mx.max(Vector2(p[0], p[1]))
+		if mx.x < rect.position.x - 20 or mn.x > rect.end.x + 20 or mx.y < rect.position.y - 20 or mn.y > rect.end.y + 20: continue
+		for x in range(floori(mn.x / 4), floori(mx.x / 4) + 1):
+			for z in range(floori(mn.y / 4), floori(mx.y / 4) + 1): occupied[Vector2i(x, z)] = true
 	ville = preload("res://scripts/ville.gd").new(self, data, ctx)
 	_roads()
 	ville.mosques()

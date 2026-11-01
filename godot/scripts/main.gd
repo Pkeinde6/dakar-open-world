@@ -66,11 +66,12 @@ func _read(k: String) -> Dictionary:
 	return JSON.parse_string(FileAccess.get_file_as_string("res://data/tuiles/%s.json" % k))
 
 func _make(k: String) -> Node3D: # construit la tuile k (appele dans un fil a part, sauf au depart)
-	var d := _read(k); var xy := k.split("_"); var tx := int(xy[0]); var tz := int(xy[1]); var ctx := []
+	var d := _read(k); var xy := k.split("_"); var tx := int(xy[0]); var tz := int(xy[1]); var ctx := []; var near_b := []
 	for a in range(-1, 2):
 		for b in range(-1, 2):
-			if a != 0 or b != 0: ctx.append_array(_read("%d_%d" % [tx + a, tz + b]).get("roads", []))
-	var q := Quartier.new(); q.key = k; q.build(d, ctx, tx, tz, monde.tile); q.set_meta("data", d)
+			if a == 0 and b == 0: continue
+			var nd := _read("%d_%d" % [tx + a, tz + b]); ctx.append_array(nd.get("roads", [])); near_b.append_array(nd.get("buildings", []))
+	var q := Quartier.new(); q.key = k; q.neighbours = near_b; q.build(d, ctx, tx, tz, monde.tile); q.set_meta("data", d)
 	return q
 
 func _load_now(k: String) -> void:

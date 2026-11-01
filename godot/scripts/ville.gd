@@ -466,7 +466,7 @@ func infill() -> void:
 					var name: String = st.houses[rng.randi() % st.houses.size()]; var S: Vector3 = model(name).size
 					var depth := S.z; var off: float = r.w / 2.0 + r.side + 1.0 + depth / 2.0
 					var c: Vector2 = a + d * s + nn * side * off
-					var ok := true
+					var ok: bool = m.rect.has_point(c) # chaque tuile ne construit que chez elle : pas de doublon au bord
 					for corner in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1), Vector2.ZERO]:
 						var q: Vector2 = c + d * corner.x * S.x / 2.0 + nn * corner.y * depth / 2.0
 						if not m._free(q.x, q.y) or on_road(q, 0.8): ok = false; break
