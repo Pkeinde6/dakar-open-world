@@ -19,6 +19,7 @@ var occupied := {} # cellules de 4 m prises par un batiment, une station : pas d
 var junctions := {} # noeud (arrondi au metre) -> nombre de routes qui s'y croisent
 var concrete: StandardMaterial3D
 var fps_label: Label
+var hint: Label
 var water: StandardMaterial3D
 var lamp_glow: StandardMaterial3D
 var clock := 0.0
@@ -60,6 +61,8 @@ func _ready() -> void:
 	var trafic = preload("res://scripts/trafic.gd").new(); add_child(trafic); trafic.setup(self, data, 18) # 18 voitures autour du joueur
 	cam = Camera3D.new(); cam.fov = 60; cam.far = 900; add_child(cam)
 	var hud := CanvasLayer.new(); add_child(hud); fps_label = Label.new(); fps_label.position = Vector2(12, 8); fps_label.add_theme_font_size_override("font_size", 22); hud.add_child(fps_label)
+	hint = Label.new(); hint.add_theme_font_size_override("font_size", 28); hint.add_theme_color_override("font_outline_color", Color.BLACK); hint.add_theme_constant_override("outline_size", 8)
+	hint.anchor_left = 0.5; hint.anchor_right = 0.5; hint.anchor_top = 0.82; hint.offset_left = -260; hint.offset_right = 260; hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; hud.add_child(hint)
 
 # ---------------------------------------------------------------- lumiere et sol
 func _environment() -> void:
@@ -528,6 +531,9 @@ func _process(dt: float) -> void:
 	cam.look_at(look)
 	frames += 1
 	fps_label.text = "%d images/s" % Engine.get_frames_per_second()
+	if driving: hint.text = "F : descendre de la voiture"
+	elif avatar.global_position.distance_to(car.global_position) < 4.0: hint.text = "F : monter dans la voiture"
+	else: hint.text = ""
 	clock += dt; ville.tick_lights(clock)
 	if water: water.uv1_offset += Vector3(dt * 0.02, 0, dt * 0.012) # vagues qui glissent
 	if frames == 600: print("FPS ", Engine.get_frames_per_second())
