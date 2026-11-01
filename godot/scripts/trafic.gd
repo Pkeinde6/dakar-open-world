@@ -15,15 +15,22 @@ var stars: Label
 var templates := {}
 
 func setup(m: Node3D, d: Dictionary, n: int) -> void:
-	main = m; data = d
-	for r in data.roads:
-		if r.t > 6 or r.pts.size() < 2: continue
-		for e in [0, r.pts.size() - 1]:
-			var k := _key(r.pts[e]); if not ends.has(k): ends[k] = []
-			ends[k].append([r, e])
+	main = m; data = d; rebuild()
 	for i in n: cars.append(_new_car(MIX[i % MIX.size()]))
 	stars = Label.new(); stars.anchor_left = 1.0; stars.anchor_right = 1.0; stars.offset_left = -230; stars.position.y = 10; stars.add_theme_font_size_override("font_size", 30); stars.add_theme_color_override("font_color", Color(1, 0.85, 0.2))
 	var hud := CanvasLayer.new(); add_child(hud); hud.add_child(stars)
+
+# carrefours et coupures de tuile : quels morceaux de rue partent de chaque point (refait quand une tuile arrive ou part)
+func rebuild() -> void:
+	ends.clear()
+	for r in data.roads:
+		if r.t > 6 or r.pts.size() < 2: continue
+		for e in [0, r.pts.size() - 1]:
+			var k := _key(r.pts[e])
+			if not ends.has(k): ends[k] = []
+			ends[k].append([r, e])
+	for c in cars: # une voiture dont la rue a disparu repart ailleurs
+		if c.r != null and not data.roads.has(c.r): c.r = null; c.body.visible = false
 
 func _key(p) -> String: return "%d,%d" % [roundi(p[0]), roundi(p[1])]
 
@@ -58,6 +65,7 @@ func _new_car(spec: Array) -> Dictionary:
 
 func _spawn(c: Dictionary, around: Vector3) -> void:
 	for tries in 8:
+		if data.roads.is_empty(): return
 		var r: Dictionary = data.roads[randi() % data.roads.size()]
 		if r.t > 5 or r.pts.size() < 2: continue
 		var i: int = randi() % (r.pts.size() - 1); var p := Vector3(r.pts[i][0], 0, r.pts[i][1])
@@ -90,7 +98,7 @@ func _turn(c: Dictionary) -> void: # au bout de la rue : une autre rue qui part 
 	else: c.dir = -1; c.s = _cum(c.r, c.r.pts.size() - 1)
 
 func _red_ahead(p: Vector2, d: Vector2) -> bool:
-	if main.ville.tl_mats.is_empty() or main.ville.tl_mats.g.emission_energy_multiplier > 0.0: return false
+	if main.ville == null or main.ville.tl_mats.is_empty() or main.ville.tl_mats.g.emission_energy_multiplier > 0.0: return false
 	for sg in data.signals:
 		var q := Vector2(sg[0], sg[1]) - p
 		if q.length() < 16 and q.length() > 4 and q.normalized().dot(d) > 0.7: return true

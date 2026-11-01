@@ -13,13 +13,13 @@ var m: Node3D # main.gd
 var data: Dictionary
 var rng := RandomNumberGenerator.new()
 var grid := {} # cellule de 40 m -> [route, indice de segment], pour les tests de proximite rapides
-var models := {} # nom -> {meshes: [[mesh, transform]], size}
+static var models := {} # nom -> {meshes, size, norm}, partage par toutes les tuiles
 var placed := {} # nom -> [[Transform3D, Color]]
 var skip_buildings := {} # indices de batiments remplaces par une mosquee
 
-func _init(main: Node3D, d: Dictionary) -> void:
-	m = main; data = d; rng.seed = 42
-	for r in data.roads:
+func _init(main: Node3D, d: Dictionary, ctx: Array = []) -> void:
+	m = main; data = d; rng.seed = hash(str(d.get("roads", []).size()) + str(d.get("buildings", []).size()))
+	for r in data.get("roads", []) + ctx:
 		for i in r.pts.size() - 1:
 			var c := Vector2i(floori((r.pts[i][0] + r.pts[i + 1][0]) / 80.0), floori((r.pts[i][1] + r.pts[i + 1][1]) / 80.0))
 			if not grid.has(c): grid[c] = []
