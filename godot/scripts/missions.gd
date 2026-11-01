@@ -67,6 +67,7 @@ func setup(m: Node3D, monde: Dictionary, hud: CanvasLayer) -> void:
 	var lb := Label.new(); lb.autowrap_mode = TextServer.AUTOWRAP_WORD; lb.custom_minimum_size = Vector2(600, 0); lb.add_theme_font_size_override("font_size", 22)
 	lb.text = "CHAPITRE 1 — LE CLANDO\n\nTu t'appelles Modou. Tu arrives de Diourbel avec un rêve : avoir ta propre affaire de transport. Ton cousin Pape te prête son vieux clando. Fais %d courses dans Dakar pour gagner ta place.\n\nArgent : %s\n\nEntrée : commencer" % [GOAL, fmt(money)]
 	card.add_child(lb); hud.add_child(card)
+	if main.capture != "": card.visible = false # pas sur les captures de controle
 
 func fmt(n: float) -> String: # 12 500 FCFA
 	var s := str(int(n)); var out := ""

@@ -242,7 +242,7 @@ func _buildings() -> void:
 		var key := Vector2i(floori(pts[0].x / 250.0), floori(pts[0].y / 250.0))
 		if not cells.has(key):
 			var nst := SurfaceTool.new(); nst.begin(Mesh.PRIMITIVE_TRIANGLES); cells[key] = nst
-		var glass_tower: bool = b.get("style", "") == "plateau" and h >= 18 and not b.mosque and rng.randf() < 0.25 # tours de verre du Plateau
+		var glass_tower: bool = b.get("style", "") == "plateau" and b.h >= 18 and b.get("src", "") != "gob" and absf(_area(pts)) < 2500 and not b.mosque and rng.randf() < 0.25 # tours de verre : vraies tours OSM du Plateau seulement
 		if glass_tower:
 			if glass_st == null: glass_st = SurfaceTool.new(); glass_st.begin(Mesh.PRIMITIVE_TRIANGLES)
 		var st: SurfaceTool = glass_st if glass_tower else cells[key]; st.set_color(col); st.set_smooth_group(-1) # aretes vives : sinon les tours paraissent fondues

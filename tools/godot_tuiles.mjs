@@ -127,6 +127,9 @@ for (const [lv, kind, flat] of D.buildings) {
 for (const [t, ...f] of L.verts) { if (t === 1) continue; const p = unflat(f), [x, z] = centre(p); if (x < XMAX) T(tileOf(x, z)).parks.push(rp(p)); }
 for (const [name, ...f] of L.places || []) { const p = unflat(f), [x, z] = centre(p); if (x < XMAX) T(tileOf(x, z)).places.push({ name, pts: rp(p) }); }
 for (const [name, x, z, area, ...f] of L.mosquees) if (x < XMAX) T(tileOf(x, z)).mosques.push({ name, x: r1(x), z: r1(z), area, pts: f.length >= 6 ? rp(unflat(f)) : null });
+// les deux grandes mosquees qu'OSM n'a qu'en point : vrai emplacement et vraie taille, modele Blender entier (comme game.js)
+for (const [name, la, lo, model, w, d] of [['Grande Mosquée de Dakar', 14.6744, -17.4447, 'mosquee_grande', 44, 48], ['Grande Mosquée de Touba', 14.8611, -15.8757, 'mosquee_touba', 96, 84]]) {
+  const x = (lo - LON0) * KX, z = -(la - LAT0) * KZ; if (x < XMAX) T(tileOf(x, z)).mosques.push({ name, x: r1(x), z: r1(z), area: w * d, model, size: [w, d], pts: null }); }
 for (const [name, ...f] of L.ecoles) { const p = unflat(f), [x, z] = centre(p); if (x < XMAX) T(tileOf(x, z)).schools.push({ name, pts: rp(p) }); }
 for (let i = 0; i < D.signals.length; i += 2) if (D.signals[i] < XMAX) T(tileOf(D.signals[i], D.signals[i + 1])).signals.push([r1(D.signals[i]), r1(D.signals[i + 1])]);
 for (const e of JSON.parse(fs.readFileSync(`${cache}/fuel.json`, 'utf8')).elements) { const la = e.lat ?? e.center?.lat, lo = e.lon ?? e.center?.lon, x = (lo - LON0) * KX, z = -(la - LAT0) * KZ;
@@ -141,6 +144,6 @@ const coast = []; for (let i = 0; i < D.coast.length; i += 2) coast.push([r1(D.c
 const s0 = [D.coast[0], D.coast[1]], e = [D.coast.at(-2), D.coast.at(-1)];
 const spawn = (([x, z]) => [r1(x), r1(z)])([(-17.4320 - LON0) * KX, -(14.6695 - LAT0) * KZ]); // Place de l'Independance
 // grande carte (touche M) : les rues principales de tout Dakar, simplifiees au metre et sans les points intermediaires
-const carte = roads.filter(r => r.t <= 5).map(r => [r.t, ...r.pts.filter((p, i) => i === 0 || i === r.pts.length - 1 || i % 2 === 0).flatMap(([x, z]) => [Math.round(x), Math.round(z)])]);
+const carte = roads.filter(r => r.t <= 8).map(r => [r.t, ...r.pts.flatMap(([x, z]) => [Math.round(x), Math.round(z)])]); // toutes les rues : le GPS part de la rue ou l'on est
 fs.writeFileSync(new URL('../godot/data/monde.json', import.meta.url), JSON.stringify({ tile: TILE, spawn, coast, carte, coastClose: [[e[0] - 3000, 30000], [-30000, 30000], [-30000, -50000], [s0[0], -50000]], tiles: [...tiles.keys()] }));
 console.log('tuiles', tiles.size, 'Mo', (bytes / 1e6).toFixed(1), 'admin', admin.length, 'routes', roads.length);

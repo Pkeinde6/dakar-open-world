@@ -135,6 +135,18 @@ func fit(name: String, pts: PackedVector2Array, col: Color, kmin := 0.6, kmax :=
 func mosques() -> void:
 	for mq in data.mosques:
 		var nm: String = mq.name
+		if mq.get("model", "") != "": # grande mosquee posee entiere, tournee vers sa rue ; le terrain dessous est libere
+			var p0 := Vector2(mq.x, mq.z); var nr0 := nearest(p0); var rot0: float = atan2(nr0.p.x - p0.x, nr0.p.y - p0.y) if not nr0.is_empty() else 0.0
+			var S0: Vector3 = model(mq.model).size
+			place(mq.model, p0.x, p0.y, rot0, mq.size[0] / S0.x, 1.0, mq.size[1] / S0.z, Color("f4f1ea"))
+			var half: float = maxf(mq.size[0], mq.size[1]) * 0.6
+			for i in data.buildings.size():
+				var c := Vector2.ZERO
+				for p in data.buildings[i].pts: c += Vector2(p[0], p[1])
+				c /= data.buildings[i].pts.size()
+				if absf(c.x - p0.x) < half and absf(c.y - p0.y) < half: skip_buildings[i] = true
+			m._take(p0.x, p0.y, half)
+			continue
 		var mod := "mosquee_divinite" if nm.to_lower().contains("divinit") else ("mosquee_grande" if mq.area > 5000 or nm.to_lower().contains("massalik") else "mosquee_quartier")
 		var col: Color = Color("f4f1ea") if mod != "mosquee_quartier" else [Color("f4f1ea"), Color("eee6cf"), Color("e3efe2")][rng.randi() % 3]
 		if mq.pts != null:
