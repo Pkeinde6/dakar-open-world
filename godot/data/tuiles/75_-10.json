@@ -1,1 +1,1 @@
-{"roads":[{"id":37860,"t":1,"ow":0,"name":"N 1","w":7.6,"side":2.5,"style":"banlieue","endA":false,"endB":false,"pts":[[30002.8,-3629.5],[30016.1,-3616.7],[30029.4,-3603.9]],"y":null}],"buildings":[],"parks":[],"places":[],"mosques":[],"schools":[],"markets":[],"fuel":[],"signals":[]}
+{"roads":[{"id":37860,"t":1,"ow":0,"name":"N 1","w":16,"side":5,"style":"banlieue","endA":false,"endB":false,"pts":[[30002.8,-3629.5],[30016.1,-3616.7],[30029.4,-3603.9]],"y":null}],"buildings":[],"parks":[],"places":[],"mosques":[],"schools":[],"markets":[],"fuel":[],"signals":[]}

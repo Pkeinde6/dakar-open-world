@@ -18,6 +18,8 @@ var cam: Camera3D
 var driving := false
 var capture := ""
 var view := "ville"
+var lieu := ""
+var carte
 var frames := 0
 var ready_frames := -1
 var fps_label: Label
@@ -37,6 +39,7 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--capture="): capture = a.substr(10)
 		if a.begins_with("--vue="): view = a.substr(6)
+		if a.begins_with("--lieu="): lieu = a.substr(7)
 	monde = JSON.parse_string(FileAccess.get_file_as_string("res://data/monde.json"))
 	for k in monde.tiles: known[k] = true
 	data.coast = monde.coast; data.coastClose = monde.coastClose
@@ -45,6 +48,9 @@ func _ready() -> void:
 	_ground()
 	var sea_maker = preload("res://scripts/ville.gd").new(self, data); sea_maker.sea()
 	var sp := Vector2(monde.spawn[0], monde.spawn[1])
+	if lieu != "": # --lieu=lat,lon : demarrer a un endroit precis (meme projection que data.js, origine 14.67, -17.44)
+		var ll := lieu.split(","); var KX := 111320.0 * cos(deg_to_rad(14.67))
+		sp = Vector2((float(ll[1]) + 17.44) * KX, -(float(ll[0]) - 14.67) * 110540.0)
 	_load_now(_tile_of(sp)) # la tuile du depart tout de suite, les voisines en fond
 	car = preload("res://scripts/car.gd").new(); add_child(car); car.setup("res://models/corolla_roues.glb", Color("f2c200"))
 	var t := _spawn_point(sp); car.global_position = t.origin + Vector3(0, 0.6, 0); car.global_basis = t.basis
@@ -56,6 +62,9 @@ func _ready() -> void:
 	cam = Camera3D.new(); cam.fov = 60; cam.far = 900; add_child(cam)
 	var hud := CanvasLayer.new(); add_child(hud); fps_label = Label.new(); fps_label.position = Vector2(12, 8); fps_label.add_theme_font_size_override("font_size", 22); hud.add_child(fps_label)
 	var mini := preload("res://scripts/minimap.gd").new(); hud.add_child(mini); mini.setup(self, data)
+	carte = preload("res://scripts/carte.gd").new(); hud.add_child(carte); carte.setup(self, monde)
+	var credit := Label.new(); credit.text = "Données : © OpenStreetMap · Google Open Buildings (CC BY 4.0)"; credit.add_theme_font_size_override("font_size", 13); credit.modulate = Color(1, 1, 1, 0.7)
+	credit.anchor_left = 1; credit.anchor_right = 1; credit.anchor_top = 1; credit.anchor_bottom = 1; credit.offset_left = -420; credit.offset_top = -24; hud.add_child(credit)
 	hint = Label.new(); hint.add_theme_font_size_override("font_size", 28); hint.add_theme_color_override("font_outline_color", Color.BLACK); hint.add_theme_constant_override("outline_size", 8)
 	hint.anchor_left = 0.5; hint.anchor_right = 0.5; hint.anchor_top = 0.82; hint.offset_left = -260; hint.offset_right = 260; hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; hud.add_child(hint)
 
@@ -65,17 +74,19 @@ func _read(k: String) -> Dictionary:
 	if not known.has(k): return {}
 	return JSON.parse_string(FileAccess.get_file_as_string("res://data/tuiles/%s.json" % k))
 
-func _make(k: String) -> Node3D: # construit la tuile k (appele dans un fil a part, sauf au depart)
+func _make(k: String, slow := false) -> Node3D: # construit la tuile k ; slow : etape par etape sur plusieurs images
 	var d := _read(k); var xy := k.split("_"); var tx := int(xy[0]); var tz := int(xy[1]); var ctx := []; var near_b := []
 	for a in range(-1, 2):
 		for b in range(-1, 2):
 			if a == 0 and b == 0: continue
 			var nd := _read("%d_%d" % [tx + a, tz + b]); ctx.append_array(nd.get("roads", [])); near_b.append_array(nd.get("buildings", []))
-	var q := Quartier.new(); q.key = k; q.neighbours = near_b; q.build(d, ctx, tx, tz, monde.tile); q.set_meta("data", d)
+	var q := Quartier.new(); q.key = k; q.neighbours = near_b; q.set_meta("data", d)
+	if slow: await q.build(d, ctx, tx, tz, monde.tile, get_tree())
+	else: q.build(d, ctx, tx, tz, monde.tile)
 	return q
 
 func _load_now(k: String) -> void:
-	if known.has(k): _attach(_make(k))
+	if known.has(k): _attach(await _make(k))
 
 func _attach(q: Node3D) -> void:
 	add_child(q); tiles[q.key] = q; pending.erase(q.key); building = false; _refresh_data()
@@ -106,7 +117,7 @@ func _stream() -> void:
 			if d < bd: bd = d; best = k
 	if best == "": return
 	building = true; pending[best] = true
-	WorkerThreadPool.add_task(func(): var q := _make(best); _attach.call_deferred(q))
+	_attach(await _make(best, true)) # sur le fil principal : depuis un autre fil, chaque appel a Godot attend l'image suivante (30 fois plus lent)
 
 # ---------------------------------------------------------------- lumiere, sol
 func _environment() -> void:
@@ -158,6 +169,8 @@ func _spawn_point(near: Vector2) -> Transform3D:
 	return best
 
 var _f_held := false
+func _unhandled_input(e: InputEvent) -> void:
+	if e is InputEventKey and e.pressed and not e.echo and (e.keycode == KEY_M or (e.keycode == KEY_ESCAPE and carte.visible)): carte.toggle()
 func _physics_process(_dt: float) -> void:
 	if Input.is_key_pressed(KEY_F) and not _f_held:
 		_f_held = true

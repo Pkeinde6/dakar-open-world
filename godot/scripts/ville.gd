@@ -452,6 +452,7 @@ func street_life() -> void:
 # Comme la version web, on construit des maisons du quartier le long des rues la ou le terrain est libre.
 func infill() -> void:
 	var n := 0
+	if data.get("buildings", []).size() > 25: return # Open Buildings et OSM couvrent deja la tuile : on n'invente rien
 	for r in data.roads:
 		if r.t < 2 or r.t > 7 or r.y != null: continue
 		var st: Dictionary = STYLES.get(r.get("style", "banlieue"), STYLES.banlieue)

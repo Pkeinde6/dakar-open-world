@@ -8,7 +8,8 @@ var glass_st: SurfaceTool
 var neighbours := [] # batiments des tuiles voisines : leur terrain est pris, rien ne se pose dessus
 
 # d : la tuile (godot/data/tuiles/x_z.json) ; ctx : les routes des 8 tuiles voisines (pour les tests de proximite au bord)
-func build(d: Dictionary, ctx: Array, tx: int, tz: int, size: float) -> void:
+# coroutine : une etape par image, pour que le jeu ne se fige pas pendant qu'une tuile se construit
+func build(d: Dictionary, ctx: Array, tx: int, tz: int, size: float, tree: SceneTree = null) -> void:
 	data = d; rect = Rect2(tx * size, tz * size, size, size)
 	concrete = _mat("res://textures/worn_plaster_wall_diff.jpg", Color(0.85, 0.83, 0.8), 3.0)
 	for r in data.roads: # vrais bouts de rue seulement (les coupures de tuile ne sont pas des carrefours)
@@ -33,21 +34,53 @@ func build(d: Dictionary, ctx: Array, tx: int, tz: int, size: float) -> void:
 		for x in range(floori(mn.x / 4), floori(mx.x / 4) + 1):
 			for z in range(floori(mn.y / 4), floori(mx.y / 4) + 1):
 				if Geometry2D.is_point_in_polygon(Vector2(x * 4 + 2, z * 4 + 2), pts): occupied[Vector2i(x, z)] = true
+	var t0 := Time.get_ticks_msec(); var tm := {}
 	ville = preload("res://scripts/ville.gd").new(self, data, ctx)
+	if tree: await tree.process_frame
+	tm["ville = preload"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	_roads()
+	if tree: await tree.process_frame
+	tm["_roads"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	ville.mosques()
+	if tree: await tree.process_frame
+	tm["ville.mosques"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	_buildings()
+	if tree: await tree.process_frame
+	tm["_buildings"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	ville.squares()
+	if tree: await tree.process_frame
+	tm["ville.squares"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	ville.markets()
+	if tree: await tree.process_frame
+	tm["ville.markets"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	ville.schools()
+	if tree: await tree.process_frame
+	tm["ville.schools"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	_fuel_stations()
+	if tree: await tree.process_frame
+	tm["_fuel_stations"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	_billboards()
+	if tree: await tree.process_frame
+	tm["_billboards"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	ville.furniture()
+	if tree: await tree.process_frame
+	tm["ville.furniture"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	ville.street_life()
+	if tree: await tree.process_frame
+	tm["ville.street_life"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	ville.infill()
+	if tree: await tree.process_frame
+	tm["ville.infill"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	_greenery()
+	if tree: await tree.process_frame
+	tm["_greenery"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	ville.flush_models()
+	if tree: await tree.process_frame
+	tm["ville.flush_models"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	_police()
+	if tree: await tree.process_frame
+	tm["_police"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
+	if OS.has_environment("DAKAR_TEMPS"): print("tuile ", key, " batiments ", data.buildings.size(), " ", tm)
 
 const PAL := [Color("e9d7a8"), Color("dcb47c"), Color("f2ece0"), Color("e3c48f"), Color("c98f6a"), Color("f0e6d2"), Color("d7cfc0"), Color("bfcfd6")]
 const BRANDS := {"total": [Color("e2231a"), Color("1d4f91")], "shell": [Color("fbce07"), Color("dd1d21")], "oilibya": [Color("009a44"), Color("e2231a")], "lybia": [Color("009a44"), Color("e2231a")], "star": [Color("1d4f91"), Color("f2c200")]}
@@ -209,10 +242,10 @@ func _buildings() -> void:
 		var key := Vector2i(floori(pts[0].x / 250.0), floori(pts[0].y / 250.0))
 		if not cells.has(key):
 			var nst := SurfaceTool.new(); nst.begin(Mesh.PRIMITIVE_TRIANGLES); cells[key] = nst
-		var glass_tower: bool = b.get("style", "") == "plateau" and h >= 18 and not b.mosque and rng.randf() < 0.4 # tours de verre du Plateau
+		var glass_tower: bool = b.get("style", "") == "plateau" and h >= 18 and not b.mosque and rng.randf() < 0.25 # tours de verre du Plateau
 		if glass_tower:
 			if glass_st == null: glass_st = SurfaceTool.new(); glass_st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		var st: SurfaceTool = glass_st if glass_tower else cells[key]; st.set_color(col)
+		var st: SurfaceTool = glass_st if glass_tower else cells[key]; st.set_color(col); st.set_smooth_group(-1) # aretes vives : sinon les tours paraissent fondues
 		if not b.mosque and b.get("use", "") == "" and rng.randf() < 0.45:
 			var cc := Vector2.ZERO
 			for p in pts: cc += p

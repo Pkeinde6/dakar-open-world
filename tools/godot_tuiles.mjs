@@ -47,6 +47,36 @@ const roads = D.roads.map(([t, ni, ow, lanes, flat, mw, ms]) => {
     const [x, z] = r.pts[i]; if (Number.isInteger(x) && Number.isInteger(z)) { const o = atV.get(vkey(x, z)); for (let k = 0; k < o.length; k += 2) if (o[k] !== ri) raise(o[k], o[k + 1], h); }
   }
 }
+// largeur reelle des rues : couloir facade a facade mesure sur OSM + Google Open Buildings (meme methode que tools/widths.mjs,
+// mais avec sept fois plus de batiments) ; la chaussee = couloir moins un trottoir de chaque cote
+{
+  const CELL = 50, grid = new Map(), gk = (gx, gz) => gx * 100000 + gz;
+  const addPoly = pts => { for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length];
+    for (let gx = Math.floor(Math.min(a[0], b[0]) / CELL); gx <= Math.floor(Math.max(a[0], b[0]) / CELL); gx++) for (let gz = Math.floor(Math.min(a[1], b[1]) / CELL); gz <= Math.floor(Math.max(a[1], b[1]) / CELL); gz++) {
+      const k = gk(gx, gz); (grid.get(k) || grid.set(k, []).get(k)).push(a[0], a[1], b[0], b[1]); } } };
+  for (const [, , flat] of D.buildings) addPoly(unflat(flat));
+  const gf = `${cache}/open_buildings_dakar.json`; if (fs.existsSync(gf)) for (const p of JSON.parse(fs.readFileSync(gf, 'utf8'))) addPoly(p);
+  const cast = (ox, oz, dx, dz, maxT) => { let best = maxT; const seen = new Set();
+    for (let t = 0; t <= maxT + CELL; t += CELL / 2) { const k = gk(Math.floor((ox + dx * Math.min(t, maxT)) / CELL), Math.floor((oz + dz * Math.min(t, maxT)) / CELL)); if (seen.has(k)) continue; seen.add(k);
+      const l = grid.get(k); if (!l) continue;
+      for (let i = 0; i < l.length; i += 4) { const ax = l[i], az = l[i + 1], ex = l[i + 2] - ax, ez = l[i + 3] - az, den = dx * ez - dz * ex; if (Math.abs(den) < 1e-9) continue;
+        const tt = ((ax - ox) * ez - (az - oz) * ex) / den, u = ((ax - ox) * dz - (az - oz) * dx) / den; if (tt > 0.5 && tt < best && u >= 0 && u <= 1) best = tt; } }
+    return best; };
+  const MINW = [7, 7, 7, 6.5, 6, 4.5, 4.5, 3.5, 3, 3, 4.5], MAXW = [12, 16, 16, 14, 12, 9, 9, 6, 6, 5, 9], SIDE = [0, 2.5, 3, 3, 2.5, 1.5, 1.5, 1, 1, 0, 0];
+  const med = a => { const q = a.slice().sort((x, y) => x - y); return q[q.length >> 1]; };
+  let measured = 0;
+  for (const r of roads) {
+    if (r.t === 0 || r.t === 9 || (r.ow && r.t <= 4)) continue; // autoroutes, pistes, chaussees separees : pas de facades a mesurer
+    const corr = [];
+    for (let i = 0; i < r.pts.length - 1; i++) { const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az); if (L < 8) continue;
+      const ux = (bx - ax) / L, uz = (bz - az) / L;
+      for (let d = 4; d < L - 4; d += 10) { const px = ax + ux * d, pz = az + uz * d, l = cast(px, pz, -uz, ux, 35), rr = cast(px, pz, uz, -ux, 35); if (l < 35 && rr < 35) corr.push(l + rr); } }
+    if (corr.length < 3) continue;
+    const c = med(corr); let w = Math.max(MINW[r.t], Math.min(MAXW[r.t], c - 2 * SIDE[r.t] - 1, c - 2));
+    r.w = Math.round(w * 10) / 10; r.side = Math.round(Math.max(0.8, Math.min(5, (c - w) / 2 - 0.4)) * 10) / 10; measured++;
+  }
+  console.log('largeurs mesurees sur les facades :', measured, '/', roads.length);
+}
 roads.forEach((r, id) => {
   if (r.t === 9) return; const st = styleAt(...r.pts[r.pts.length >> 1]), up = r.y && r.y.some(v => v > 0.05);
   let start = 0;
@@ -78,6 +108,22 @@ for (const [lv, kind, flat] of D.buildings) {
   const a = (agrid.get(k) || []).find(o => inP(bx, bz, o.g) || inP(o.cx, o.cz, p));
   T(k).buildings.push({ h: kind === 1 ? 11 : lv ? lv * 3.1 : 0, mosque: kind === 1, style: styleAt(bx, bz), use: a ? a.kind : '', name: a ? a.name : '', pts: rp(p) });
 }
+// Google Open Buildings (satellite + IA, CC BY 4.0) : les batiments qu'OSM n'a pas, a leur vrai emplacement.
+// Fichier prepare par tools/open_buildings.mjs ; on ne garde que ceux qui ne recouvrent pas un batiment OSM.
+{
+  const gf = `${cache}/open_buildings_dakar.json`;
+  if (fs.existsSync(gf)) {
+    const osmGrid = new Map(); // tuile -> centres et boites des batiments OSM deja places
+    for (const [k, t] of tiles) for (const b of t.buildings) { const xs = b.pts.map(p => p[0]), zs = b.pts.map(p => p[1]); (osmGrid.get(k) || osmGrid.set(k, []).get(k)).push([Math.min(...xs) - 1, Math.max(...xs) + 1, Math.min(...zs) - 1, Math.max(...zs) + 1, b.pts]); }
+    let added = 0, dup = 0;
+    for (const p of JSON.parse(fs.readFileSync(gf, 'utf8'))) {
+      const [bx, bz] = centre(p); if (bx > XMAX) continue; const k = tileOf(bx, bz);
+      if ((osmGrid.get(k) || []).some(([x0, x1, z0, z1, q]) => bx > x0 && bx < x1 && bz > z0 && bz < z1 && inP(bx, bz, q))) { dup++; continue; }
+      T(k).buildings.push({ h: 0, mosque: false, style: styleAt(bx, bz), use: '', name: '', src: 'gob', pts: rp(p) }); added++;
+    }
+    console.log('Open Buildings : ajoutes', added, 'deja dans OSM', dup);
+  }
+}
 for (const [t, ...f] of L.verts) { if (t === 1) continue; const p = unflat(f), [x, z] = centre(p); if (x < XMAX) T(tileOf(x, z)).parks.push(rp(p)); }
 for (const [name, ...f] of L.places || []) { const p = unflat(f), [x, z] = centre(p); if (x < XMAX) T(tileOf(x, z)).places.push({ name, pts: rp(p) }); }
 for (const [name, x, z, area, ...f] of L.mosquees) if (x < XMAX) T(tileOf(x, z)).mosques.push({ name, x: r1(x), z: r1(z), area, pts: f.length >= 6 ? rp(unflat(f)) : null });
@@ -94,5 +140,7 @@ let bytes = 0; for (const [k, v] of tiles) { const s = JSON.stringify(v); bytes 
 const coast = []; for (let i = 0; i < D.coast.length; i += 2) coast.push([r1(D.coast[i]), r1(D.coast[i + 1])]);
 const s0 = [D.coast[0], D.coast[1]], e = [D.coast.at(-2), D.coast.at(-1)];
 const spawn = (([x, z]) => [r1(x), r1(z)])([(-17.4320 - LON0) * KX, -(14.6695 - LAT0) * KZ]); // Place de l'Independance
-fs.writeFileSync(new URL('../godot/data/monde.json', import.meta.url), JSON.stringify({ tile: TILE, spawn, coast, coastClose: [[e[0] - 3000, 30000], [-30000, 30000], [-30000, -50000], [s0[0], -50000]], tiles: [...tiles.keys()] }));
+// grande carte (touche M) : les rues principales de tout Dakar, simplifiees au metre et sans les points intermediaires
+const carte = roads.filter(r => r.t <= 5).map(r => [r.t, ...r.pts.filter((p, i) => i === 0 || i === r.pts.length - 1 || i % 2 === 0).flatMap(([x, z]) => [Math.round(x), Math.round(z)])]);
+fs.writeFileSync(new URL('../godot/data/monde.json', import.meta.url), JSON.stringify({ tile: TILE, spawn, coast, carte, coastClose: [[e[0] - 3000, 30000], [-30000, 30000], [-30000, -50000], [s0[0], -50000]], tiles: [...tiles.keys()] }));
 console.log('tuiles', tiles.size, 'Mo', (bytes / 1e6).toFixed(1), 'admin', admin.length, 'routes', roads.length);
