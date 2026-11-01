@@ -27,7 +27,9 @@ var route_mat := StandardMaterial3D.new()
 var route_t := 0.0
 var talk_t := 0.0
 var hud_money: Label
-var subs: Label
+var hud_rides: Label
+var subs_box: PanelContainer
+var subs: RichTextLabel
 var card: PanelContainer
 var started := false
 var path := PackedVector2Array() # dernier itineraire calcule (pour les cartes)
@@ -60,13 +62,19 @@ func setup(m: Node3D, monde: Dictionary, hud: CanvasLayer) -> void:
 	route_mat.emission_enabled = true; route_mat.emission = Color(0.6, 0.2, 0.9); route_mat.cull_mode = BaseMaterial3D.CULL_DISABLED; route_mat.no_depth_test = false
 	add_child(route_mi); route_mi.material_override = route_mat
 	# interface : argent, sous-titres, carte de chapitre
-	hud_money = Label.new(); hud_money.anchor_left = 1; hud_money.anchor_right = 1; hud_money.offset_left = -260; hud_money.position.y = 48; hud_money.add_theme_font_size_override("font_size", 30); hud_money.add_theme_color_override("font_color", Color(0.45, 0.9, 0.45)); hud.add_child(hud_money)
-	subs = Label.new(); subs.anchor_left = 0.5; subs.anchor_right = 0.5; subs.anchor_top = 0.72; subs.offset_left = -480; subs.offset_right = 480; subs.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; subs.autowrap_mode = TextServer.AUTOWRAP_WORD
-	subs.add_theme_font_size_override("font_size", 24); subs.add_theme_color_override("font_outline_color", Color.BLACK); subs.add_theme_constant_override("outline_size", 8); hud.add_child(subs)
-	card = PanelContainer.new(); card.set_anchors_preset(Control.PRESET_CENTER); card.custom_minimum_size = Vector2(620, 0); card.offset_left = -310; card.offset_top = -150
-	var lb := Label.new(); lb.autowrap_mode = TextServer.AUTOWRAP_WORD; lb.custom_minimum_size = Vector2(600, 0); lb.add_theme_font_size_override("font_size", 22)
-	lb.text = "CHAPITRE 1 — LE CLANDO\n\nTu t'appelles Modou. Tu arrives de Diourbel avec un rêve : avoir ta propre affaire de transport. Ton cousin Pape te prête son vieux clando. Fais %d courses dans Dakar pour gagner ta place.\n\nArgent : %s\n\nEntrée : commencer" % [GOAL, fmt(money)]
-	card.add_child(lb); hud.add_child(card)
+	var UI := preload("res://scripts/ui.gd")
+	var money_box := UI.panel(0.72, 14, 16, true); money_box.anchor_left = 1; money_box.anchor_right = 1; money_box.grow_horizontal = Control.GROW_DIRECTION_BEGIN; money_box.offset_right = -18; money_box.offset_top = 16
+	var vb := VBoxContainer.new(); money_box.add_child(vb); hud_money = UI.label("", 26, Color("7ee081"), true); vb.add_child(hud_money); hud_rides = UI.label("", 15, Color(1, 1, 1, 0.8)); vb.add_child(hud_rides); hud.add_child(money_box)
+	subs_box = UI.panel(0.7, 12, 20); subs_box.anchor_left = 0.5; subs_box.anchor_right = 0.5; subs_box.anchor_top = 1; subs_box.anchor_bottom = 1; subs_box.grow_horizontal = Control.GROW_DIRECTION_BOTH; subs_box.offset_top = -160; subs_box.visible = false
+	subs = RichTextLabel.new(); subs.bbcode_enabled = true; subs.fit_content = true; subs.autowrap_mode = TextServer.AUTOWRAP_OFF; subs.scroll_active = false; subs.add_theme_font_size_override("normal_font_size", 20); subs.add_theme_font_size_override("bold_font_size", 20); subs_box.add_child(subs); hud.add_child(subs_box)
+	card = UI.panel(0.9, 18, 34, true); card.set_anchors_preset(Control.PRESET_CENTER); card.grow_horizontal = Control.GROW_DIRECTION_BOTH; card.grow_vertical = Control.GROW_DIRECTION_BOTH
+	var cv := VBoxContainer.new(); cv.add_theme_constant_override("separation", 14); card.add_child(cv)
+	cv.add_child(UI.label("CHAPITRE 1", 15, UI.ACCENT)); cv.add_child(UI.label("Le clando", 40, UI.TEXT, true))
+	var body: Label = UI.label("Tu t'appelles Modou. Tu arrives de Diourbel avec un rêve : avoir ta propre affaire de transport. Ton cousin Pape te prête son vieux clando. Fais %d courses dans Dakar pour gagner ta place." % GOAL, 19, Color(1, 1, 1, 0.88))
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD; body.custom_minimum_size = Vector2(560, 0); cv.add_child(body)
+	cv.add_child(UI.label("Argent : " + fmt(money), 18, Color("7ee081")))
+	var go := UI.panel(1.0, 10, 18); go.get_theme_stylebox("panel").bg_color = UI.ACCENT; go.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	go.add_child(UI.label("Entrée  ·  Commencer", 19, Color("1b1f27"))); cv.add_child(go); hud.add_child(card)
 	if main.capture != "": card.visible = false # pas sur les captures de controle
 
 func fmt(n: float) -> String: # 12 500 FCFA
@@ -74,7 +82,8 @@ func fmt(n: float) -> String: # 12 500 FCFA
 	while s.length() > 3: out = " " + s.substr(s.length() - 3) + out; s = s.substr(0, s.length() - 3)
 	return s + out + " FCFA"
 
-func say(who: String, txt: String) -> void: subs.text = "%s  %s" % [who, txt]; talk_t = 5.0
+func say(who: String, txt: String) -> void:
+	subs.text = ("[color=#f2c14e][b]%s[/b][/color]  %s" % [who.trim_suffix(" :"), txt]) if who != "" else txt; subs_box.visible = true; talk_t = 5.0
 
 func _unhandled_input(e: InputEvent) -> void:
 	if not started and e is InputEventKey and e.pressed and e.keycode in [KEY_ENTER, KEY_KP_ENTER]: started = true; card.visible = false; _new_mission()
@@ -174,7 +183,7 @@ func _draw_route(path: PackedVector2Array) -> void: # bande de 1,6 m au milieu d
 func _process(dt: float) -> void:
 	hud_money.text = "%s\nCourses %d/%d" % [fmt(money), done, GOAL]
 	talk_t -= dt
-	if talk_t < 0: subs.text = ""
+	if talk_t < 0: subs_box.visible = false
 	if not started or stage == "none": return
 	route_mat.uv1_offset.y -= dt * 0.8 # les chevrons avancent
 	var pl := _player_pos(); var tgt: Vector2 = pick.p if stage == "pickup" else drop.p

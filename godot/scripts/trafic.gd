@@ -9,6 +9,7 @@ var data: Dictionary
 var ends := {} # noeud arrondi -> [[route, 0 ou dernier indice], ...] pour tourner aux carrefours
 var cars := []
 var cops := []
+const POLICE := false
 var wanted := 0.0
 var calm := 0.0
 var stars: Label
@@ -18,7 +19,7 @@ func setup(m: Node3D, d: Dictionary, n: int) -> void:
 	main = m; data = d; rebuild()
 	for i in n: cars.append(_new_car(MIX[i % MIX.size()]))
 	stars = Label.new(); stars.anchor_left = 1.0; stars.anchor_right = 1.0; stars.offset_left = -230; stars.position.y = 10; stars.add_theme_font_size_override("font_size", 30); stars.add_theme_color_override("font_color", Color(1, 0.85, 0.2))
-	var hud := CanvasLayer.new(); add_child(hud); hud.add_child(stars)
+	var hud := CanvasLayer.new(); add_child(hud); hud.add_child(stars); stars.visible = POLICE
 
 # carrefours et coupures de tuile : quels morceaux de rue partent de chaque point (refait quand une tuile arrive ou part)
 func rebuild() -> void:
@@ -133,7 +134,8 @@ func _physics_process(dt: float) -> void:
 		# choc avec la voiture du joueur : plus d'etoiles de police
 		c.hit -= dt
 		if main.driving and c.hit <= 0 and pos.distance_to(ppos) < c.len / 2.0 + 2.0 and main.car.linear_velocity.length() > 6:
-			c.hit = 2.0; wanted = minf(5, wanted + 1); calm = 0.0
+			c.hit = 2.0 # police desactivee pour le moment (POLICE = true pour la remettre)
+			if POLICE: wanted = minf(5, wanted + 1); calm = 0.0
 	_police(dt, ppos)
 
 func _police(dt: float, ppos: Vector3) -> void:

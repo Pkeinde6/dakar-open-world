@@ -25,6 +25,7 @@ var frames := 0
 var ready_frames := -1
 var fps_label: Label
 var hint: Label
+var hint_box: PanelContainer
 var trafic
 var water: StandardMaterial3D
 var clock := 0.0
@@ -61,14 +62,15 @@ func _ready() -> void:
 	trafic = preload("res://scripts/trafic.gd").new(); add_child(trafic); trafic.setup(self, data, 18)
 	_passersby()
 	cam = Camera3D.new(); cam.fov = 60; cam.far = 900; add_child(cam)
-	var hud := CanvasLayer.new(); add_child(hud); fps_label = Label.new(); fps_label.position = Vector2(12, 8); fps_label.add_theme_font_size_override("font_size", 22); hud.add_child(fps_label)
+	var UI := preload("res://scripts/ui.gd")
+	var hud := CanvasLayer.new(); add_child(hud); fps_label = UI.label("", 15, Color(1, 1, 1, 0.85)); fps_label.position = Vector2(14, 10); fps_label.visible = false; hud.add_child(fps_label) # F3 pour l'afficher
 	var mini := preload("res://scripts/minimap.gd").new(); hud.add_child(mini); mini.setup(self, data)
 	carte = preload("res://scripts/carte.gd").new(); hud.add_child(carte); carte.setup(self, monde)
 	missions = preload("res://scripts/missions.gd").new(); add_child(missions); missions.setup(self, monde, hud)
-	var credit := Label.new(); credit.text = "Données : © OpenStreetMap · Google Open Buildings (CC BY 4.0)"; credit.add_theme_font_size_override("font_size", 13); credit.modulate = Color(1, 1, 1, 0.7)
-	credit.anchor_left = 1; credit.anchor_right = 1; credit.anchor_top = 1; credit.anchor_bottom = 1; credit.offset_left = -420; credit.offset_top = -24; hud.add_child(credit)
-	hint = Label.new(); hint.add_theme_font_size_override("font_size", 28); hint.add_theme_color_override("font_outline_color", Color.BLACK); hint.add_theme_constant_override("outline_size", 8)
-	hint.anchor_left = 0.5; hint.anchor_right = 0.5; hint.anchor_top = 0.82; hint.offset_left = -260; hint.offset_right = 260; hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; hud.add_child(hint)
+	var credit: Label = UI.label("© OpenStreetMap · Google Open Buildings (CC BY 4.0)", 11, Color(1, 1, 1, 0.55))
+	credit.anchor_left = 1; credit.anchor_right = 1; credit.anchor_top = 1; credit.anchor_bottom = 1; credit.offset_left = -330; credit.offset_top = -20; hud.add_child(credit)
+	hint_box = UI.panel(0.72, 22, 18); hint_box.anchor_left = 0.5; hint_box.anchor_right = 0.5; hint_box.anchor_top = 1; hint_box.anchor_bottom = 1; hint_box.grow_horizontal = Control.GROW_DIRECTION_BOTH; hint_box.offset_top = -86; hint_box.visible = false
+	hint = UI.label("", 20); hint_box.add_child(hint); hud.add_child(hint_box)
 
 # ---------------------------------------------------------------- tuiles
 func _tile_of(p: Vector2) -> String: return "%d_%d" % [floori(p.x / monde.tile), floori(p.y / monde.tile)]
@@ -172,6 +174,7 @@ func _spawn_point(near: Vector2) -> Transform3D:
 
 var _f_held := false
 func _unhandled_input(e: InputEvent) -> void:
+	if e is InputEventKey and e.pressed and e.keycode == KEY_F3: fps_label.visible = not fps_label.visible
 	if e is InputEventKey and e.pressed and not e.echo and (e.keycode == KEY_M or (e.keycode == KEY_ESCAPE and carte.visible)): carte.toggle()
 func _physics_process(_dt: float) -> void:
 	if Input.is_key_pressed(KEY_F) and not _f_held:
@@ -209,9 +212,10 @@ func _process(dt: float) -> void:
 	if ville: ville.tick_lights(clock)
 	if water: water.uv1_offset += Vector3(dt * 0.02, 0, dt * 0.012) # vagues qui glissent
 	fps_label.text = "%d images/s · qualité %s · %d tuiles" % [Engine.get_frames_per_second(), ["très basse", "basse", "moyenne", "haute"][level], tiles.size()]
-	if driving: hint.text = "F : descendre de la voiture"
-	elif avatar.global_position.distance_to(car.global_position) < 4.0: hint.text = "F : monter dans la voiture"
+	if driving: hint.text = "[F]  Descendre de la voiture"
+	elif avatar.global_position.distance_to(car.global_position) < 4.0: hint.text = "[F]  Monter dans la voiture"
 	else: hint.text = ""
+	hint_box.visible = hint.text != "" and not carte.visible
 	_auto_quality(dt)
 	if capture != "": # image quand les 9 tuiles proches sont la (ou au bout de 3 min)
 		if ready_frames < 0 and (tiles.size() >= 9 or frames > 9000): ready_frames = frames

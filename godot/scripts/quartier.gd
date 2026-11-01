@@ -77,7 +77,7 @@ func build(d: Dictionary, ctx: Array, tx: int, tz: int, size: float, tree: Scene
 	ville.flush_models()
 	if tree: await tree.process_frame
 	tm["ville.flush_models"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
-	_police()
+	# _police() : policiers aux carrefours, retires pour le moment
 	if tree: await tree.process_frame
 	tm["_police"] = Time.get_ticks_msec() - t0; t0 = Time.get_ticks_msec()
 	if OS.has_environment("DAKAR_TEMPS"): print("tuile ", key, " batiments ", data.buildings.size(), " ", tm)
