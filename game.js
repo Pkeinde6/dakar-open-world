@@ -787,7 +787,9 @@ function addBuilding(B, pts, h, colHex, roofHex, shops = false) {
     const tri = area > 0 ? [A, C, Bv, A, Dv, C] : [A, Bv, C, A, C, Dv];
     for (const q of tri) { B.pos.push(q[0], q[1], q[2]); B.nor.push(nx, 0, nz); B.uv.push(q[3], q[4]); B.col.push(c.r, c.g, c.b); }
     if (shopRow) { // ground floor = shopfronts (u spans ~4 m per shop)
-      const S = B.shop, su0 = per / 32 + Math.random(), su1 = su0 + L / 32;
+      const S = B.shop, s0 = per / 32 + Math.random(), s1 = s0 + L / 32;
+      // vu de la rue (on regarde vers -n), la droite est (nz, -nx) : le u doit croitre vers elle, sinon les enseignes sont ecrites a l'envers
+      const [su0, su1] = (dx * nz - dz * nx) >= 0 ? [s0, s1] : [s1, s0];
       const a = [ax, 0, az, su0, 0], b = [bx, 0, bz, su1, 0], cc = [bx, 3.1, bz, su1, 1], d = [ax, 3.1, az, su0, 1];
       for (const q of (area > 0 ? [a, cc, b, a, d, cc] : [a, b, cc, a, cc, d])) { S.pos.push(q[0], q[1], q[2]); S.nor.push(nx, 0, nz); S.uv.push(q[3], q[4]); S.col.push(1, 1, 1); }
     }

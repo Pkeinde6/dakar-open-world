@@ -5,6 +5,8 @@ extends Node3D
 var key := ""
 var rect := Rect2() # emprise de la tuile en metres
 var glass_st: SurfaceTool
+var shop_st: SurfaceTool
+var awning_st: SurfaceTool
 var neighbours := [] # batiments des tuiles voisines : leur terrain est pris, rien ne se pose dessus
 
 # d : la tuile (godot/data/tuiles/x_z.json) ; ctx : les routes des 8 tuiles voisines (pour les tests de proximite au bord)
@@ -251,27 +253,74 @@ func _buildings() -> void:
 			for p in pts: cc += p
 			ville.roofs.append([cc / pts.size(), h])
 		var cw := _area(pts) > 0
+		var shops: bool = not b.mosque and b.get("use", "") == "" and pts.size() <= 10 and rng.randf() < {"plateau": 0.85, "medina": 0.65, "sicap": 0.3, "villa": 0.08}.get(b.get("style", ""), 0.5) # rez-de-chaussee commercant, comme le site
 		for i in pts.size():
 			var a := pts[i]; var c := pts[(i + 1) % pts.size()]
 			var v := [Vector3(a.x, 0, a.y), Vector3(c.x, 0, c.y), Vector3(c.x, h, c.y), Vector3(a.x, h, a.y)]
 			for k in ([0, 2, 1, 0, 3, 2] if cw else [0, 1, 2, 0, 2, 3]): st.add_vertex(v[k])
 			var w := [Vector3(a.x, h, a.y), Vector3(c.x, h, c.y), Vector3(c.x, h + 0.6, c.y), Vector3(a.x, h + 0.6, a.y)] # acrotere
 			for k in [0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2]: st.add_vertex(w[k])
+			if shops and not glass_tower and h >= 3 and a.distance_to(c) > 3.5: _shopfront(pts, a, c, rng)
 		var tri := Geometry2D.triangulate_polygon(pts)
 		for k in range(0, tri.size(), 3):
 			for j in ([tri[k], tri[k + 1], tri[k + 2]] if cw else [tri[k], tri[k + 2], tri[k + 1]]): st.add_vertex(Vector3(pts[j].x, h, pts[j].y))
+		if b.mosque: _mosque_tops(pts, h)
 		var bb := Rect2(pts[0], Vector2.ZERO)
 		for p in pts: bb = bb.expand(p)
 		for x in range(floori(bb.position.x / 4), floori(bb.end.x / 4) + 1):
 			for z in range(floori(bb.position.y / 4), floori(bb.end.y / 4) + 1): occupied[Vector2i(x, z)] = true
 	for st in cells.values():
 		st.generate_normals(); _static(st.commit(), m)
+	if shop_st: # devantures (textures/boutiques.png) et baches colorees
+		var sm := StandardMaterial3D.new(); sm.albedo_texture = load("res://textures/boutiques.png"); sm.roughness = 0.8; sm.cull_mode = BaseMaterial3D.CULL_DISABLED; sm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+		shop_st.generate_normals(); _static(shop_st.commit(), sm, false)
+		var am := StandardMaterial3D.new(); am.vertex_color_use_as_albedo = true; am.roughness = 0.9; am.cull_mode = BaseMaterial3D.CULL_DISABLED
+		awning_st.generate_normals(); _static(awning_st.commit(), am, false)
 	if glass_st: # mur-rideau bleu-vert qui reflete le ciel
 		var gm := StandardMaterial3D.new(); gm.albedo_color = Color(0.32, 0.45, 0.5); gm.metallic = 0.85; gm.roughness = 0.08; gm.cull_mode = BaseMaterial3D.CULL_DISABLED
 		glass_st.generate_normals(); _static(glass_st.commit(), gm)
 
 # OSM et largeurs de rue ne s'accordent pas toujours : chaque coin qui mord sur une rue (chaussee + trottoir) est
 # repousse dehors ; un batiment enfonce de plus de 6 m dans la rue est abandonne (false)
+# devanture de boutique sur le rez-de-chaussee du mur a -> c (4 m environ par boutique), bache au-dessus une fois sur deux.
+# Le u de la texture croit vers la droite vu de la rue : les enseignes ne sont jamais ecrites a l'envers.
+const TARPS := [Color("d8432f"), Color("2a7fd4"), Color("f2b01e"), Color("2f9e54"), Color("e8e2d4"), Color("9b4fc4")]
+func _shopfront(pts: PackedVector2Array, a: Vector2, c: Vector2, rng: RandomNumberGenerator) -> void:
+	if shop_st == null:
+		shop_st = SurfaceTool.new(); shop_st.begin(Mesh.PRIMITIVE_TRIANGLES); awning_st = SurfaceTool.new(); awning_st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var e := c - a; var L := e.length(); var n := Vector2(e.y, -e.x).normalized()
+	if Geometry2D.is_point_in_polygon((a + c) / 2.0 + n * 0.3, pts): n = -n # n sort du batiment
+	var right := Vector2(n.y, -n.x) # vu de la rue (on regarde vers -n), la droite
+	var p0 := a; var p1 := c
+	if e.dot(right) < 0: p0 = c; p1 = a
+	var off := n * 0.04; var u0 := rng.randf(); var u1 := u0 + L / 32.0 # 1/8 de texture = une boutique de 4 m
+	var q := [[p0 + off, 0.0, u0, 1.0], [p1 + off, 0.0, u1, 1.0], [p1 + off, 3.1, u1, 0.0], [p0 + off, 3.1, u0, 0.0]]
+	for k in [0, 1, 2, 0, 2, 3]: shop_st.set_uv(Vector2(q[k][2], q[k][3])); shop_st.add_vertex(Vector3(q[k][0].x, q[k][1], q[k][0].y))
+	if rng.randf() < 0.5: # bache : toile tendue a 3 m et lambrequin qui pend
+		var col: Color = TARPS[rng.randi() % TARPS.size()]; awning_st.set_color(col)
+		var s0 := p0 + (p1 - p0).normalized() * 0.3; var s1 := p1 - (p1 - p0).normalized() * 0.3
+		var t := [Vector3(s0.x, 3.0, s0.y), Vector3(s1.x, 3.0, s1.y), Vector3(s1.x + n.x * 0.9, 2.75, s1.y + n.y * 0.9), Vector3(s0.x + n.x * 0.9, 2.75, s0.y + n.y * 0.9)]
+		for k in [0, 1, 2, 0, 2, 3]: awning_st.add_vertex(t[k])
+		var f := [t[3], t[2], t[2] + Vector3.DOWN * 0.35, t[3] + Vector3.DOWN * 0.35]
+		for k in [0, 1, 2, 0, 2, 3]: awning_st.add_vertex(f[k])
+
+# mosquee OSM (contour seulement) : minaret blanc a pointe verte au coin, coupole verte sur le toit (comme addMinaret du site)
+func _mosque_tops(pts: PackedVector2Array, h: float) -> void:
+	var A := absf(_area(pts)); var c := Vector2.ZERO
+	for p in pts: c += p
+	c /= pts.size()
+	var white := _plain(Color("f2ece0"), 0.7); var green := _plain(Color("2f8f5a"), 0.4); green.metallic = 0.2
+	var dome := SphereMesh.new(); var r := clampf(sqrt(A) * 0.22, 2.5, 9.0); dome.radius = r; dome.height = r * 1.1; dome.is_hemisphere = true
+	var dm := MeshInstance3D.new(); dm.mesh = dome; dm.material_override = green; dm.position = Vector3(c.x, h + 0.6, c.y); add_child(dm)
+	if A < 120: return
+	var mh := clampf(sqrt(A) * 0.9, 18.0, 60.0); var corner := pts[0].lerp(c, 0.12) # minaret pres d'un coin
+	var shaft := CylinderMesh.new(); shaft.top_radius = mh * 0.035; shaft.bottom_radius = mh * 0.045; shaft.height = mh
+	var sm := MeshInstance3D.new(); sm.mesh = shaft; sm.material_override = white; sm.position = Vector3(corner.x, mh / 2.0, corner.y); add_child(sm)
+	var ring := CylinderMesh.new(); ring.top_radius = mh * 0.065; ring.bottom_radius = mh * 0.065; ring.height = mh * 0.025
+	var rm := MeshInstance3D.new(); rm.mesh = ring; rm.material_override = white; rm.position = Vector3(corner.x, mh * 0.82, corner.y); add_child(rm)
+	var cone := CylinderMesh.new(); cone.top_radius = 0.0; cone.bottom_radius = mh * 0.045; cone.height = mh * 0.09
+	var cm := MeshInstance3D.new(); cm.mesh = cone; cm.material_override = green; cm.position = Vector3(corner.x, mh + mh * 0.045, corner.y); add_child(cm)
+
 func _pull_back(pts: PackedVector2Array) -> bool:
 	var c := Vector2.ZERO
 	for p in pts: c += p

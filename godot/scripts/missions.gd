@@ -33,6 +33,7 @@ var subs: RichTextLabel
 var card: PanelContainer
 var started := false
 var path := PackedVector2Array() # dernier itineraire calcule (pour les cartes)
+var waypoint := Vector2.INF # repere pose sur la grande carte (clic)
 
 func setup(m: Node3D, monde: Dictionary, hud: CanvasLayer) -> void:
 	main = m
@@ -126,6 +127,9 @@ func _new_mission() -> void:
 	pick = {"p": pk.p, "name": nm}; stage = "pickup"; _target(pick.p)
 	say("", "Client à %s — suis le marquage violet" % pick.name)
 
+func set_waypoint(p: Vector2) -> void: # repere libre : le GPS y mene tant qu'aucune course n'est en cours
+	waypoint = p; path = PackedVector2Array(); route_t = 0.0
+
 func _target(p: Vector2) -> void: marker.visible = true; marker.global_position = Vector3(p.x, 0, p.y); route_t = 0.0; path = PackedVector2Array()
 
 func _player_pos() -> Vector2:
@@ -186,6 +190,12 @@ func _process(dt: float) -> void:
 	hud_money.text = "%s\nCourses %d/%d" % [fmt(money), done, GOAL]
 	talk_t -= dt
 	if talk_t < 0: subs_box.visible = false
+	if waypoint != Vector2.INF and (stage == "none" or not started): # repere de la carte, hors course
+		route_mat.uv1_offset.y -= dt * 0.8; route_t -= dt
+		var wp := _player_pos()
+		if wp.distance_to(waypoint) < 15.0: waypoint = Vector2.INF; path = PackedVector2Array(); route_mi.mesh = null
+		elif route_t <= 0: route_t = 2.0; path = _route(wp, waypoint); _draw_route(path)
+		return
 	if not started or stage == "none": return
 	route_mat.uv1_offset.y -= dt * 0.8 # les chevrons avancent
 	var pl := _player_pos(); var tgt: Vector2 = pick.p if stage == "pickup" else drop.p

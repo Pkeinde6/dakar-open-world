@@ -204,6 +204,13 @@ func _physics_process(_dt: float) -> void:
 		elif avatar.global_position.distance_to(car.global_position) < 4.0: _enter_car()
 	elif not Input.is_key_pressed(KEY_F): _f_held = false
 
+func teleport(p: Vector2) -> void: # double-clic sur la grande carte : la voiture (ou le pieton) sur la rue la plus proche
+	if not tiles.has(_tile_of(p)): await _load_now(_tile_of(p)) # la tuile d'arrivee d'abord, pour y trouver une rue
+	var t := _spawn_point(p)
+	if driving:
+		car.global_transform = Transform3D(t.basis, t.origin + Vector3.UP * 1.0); car.linear_velocity = Vector3.ZERO; car.angular_velocity = Vector3.ZERO
+	else: avatar.global_position = t.origin + Vector3.UP * 0.5
+
 func _enter_car() -> void:
 	driving = true; car.driven = false
 	avatar.look_at(car.global_position, Vector3.UP, true)
