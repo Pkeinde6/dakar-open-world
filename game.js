@@ -539,7 +539,11 @@ const pitchMat = new THREE.MeshStandardMaterial({ map: pitchTex, roughness: 1, p
 const players = [];
 const bushMat = new THREE.MeshStandardMaterial({ color: 0x4d6b2c, roughness: 1, flatShading: true });
 const grassMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide });
-const neemMat = new THREE.MeshStandardMaterial({ color: 0x56783a, roughness: 1, flatShading: true });
+// feuillage des neems : petites feuilles ovales decoupees (alphaTest) au lieu d'une boule lisse
+const leafCardTex = canvasTex(128, 128, (g) => { g.clearRect(0, 0, 128, 128);
+  for (let k = 0; k < 9; k++) { const cx = rand(24, 104), cy = rand(24, 104), a = rand(0, 6.28); g.save(); g.translate(cx, cy); g.rotate(a);
+    g.fillStyle = pick(['#3e6b1f', '#4f7d26', '#5f8a2c', '#46732a']); g.beginPath(); g.ellipse(0, 0, 22, 8, 0, 0, 7); g.fill(); g.strokeStyle = 'rgba(30,50,10,.6)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(-20, 0); g.lineTo(20, 0); g.stroke(); g.restore(); } }, false);
+const neemMat = new THREE.MeshStandardMaterial({ map: leafCardTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8 });
 windy(leafMat, 7.5, 0.06); windy(palmTrunkMat, 3, 0.012); windy(neemMat, -3, 0.035); windy(grassMat, 0, 0.12); windy(bushMat, 0, 0.05);
 
 // ground
@@ -1219,6 +1223,7 @@ function buildChunk(gx, gz) {
   const tlObjs = [];
   for (const si of sl) { const s = signals[si]; tlObjs.push(makeTrafficLight(group, s)); }
   const hgrid = buildTerrain(group, gx, gz, cols, flats);
+  flushProps(group);
   scene.add(group);
   colliders.set(k, cols);
   return { k, group, tl: tlObjs, hgrid };
@@ -1392,7 +1397,15 @@ const G = (() => {
   const leaves = []; for (let i = 0; i < 9; i++) { const l = new THREE.PlaneGeometry(0.9, 4.2, 1, 3); const p = l.attributes.position; for (let j = 0; j < p.count; j++) { const yy = p.getY(j) + 2.1; p.setZ(j, -0.09 * yy * yy); p.setY(j, yy); } l.rotateX(-Math.PI / 2.6); l.rotateY(i / 9 * Math.PI * 2); l.translate(0, 9, 0); leaves.push(l); }
   const crown = mergeGeometries(leaves);
   const neemT = new THREE.CylinderGeometry(0.25, 0.4, 4.5, 6).translate(0, 2.25, 0);
-  const neem = new THREE.IcosahedronGeometry(3, 1);
+  const neem = (() => { // ~260 feuilles en touffes autour d'une sphere de 3 m (plus dense au centre), coeur sombre pour boucher les trous
+    const pos = [], uv = [], q = new THREE.Vector3(), u = new THREE.Vector3(), v = new THREE.Vector3();
+    for (let i = 0; i < 260; i++) {
+      const d = new THREE.Vector3(rand(-1, 1), rand(-0.6, 1), rand(-1, 1)).normalize(), c = d.clone().multiplyScalar(3 * rand(0.55, 1.05)), s = rand(0.45, 0.8);
+      u.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).cross(d).normalize().multiplyScalar(s); v.copy(d).cross(u).normalize().multiplyScalar(s);
+      const P = [c.clone().sub(u).sub(v), c.clone().add(u).sub(v), c.clone().add(u).add(v), c.clone().sub(u).add(v)], T = [[0, 0], [1, 0], [1, 1], [0, 1]];
+      for (const k of [0, 1, 2, 0, 2, 3]) { pos.push(P[k].x, P[k].y, P[k].z); uv.push(...T[k]); }
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals(); return g; })();
   // parked cars: a sedan side profile (Peugeot 405 / Corolla shape) extruded across, glass and wheels apart
   const profile = (pts, depth, bevel) => { const sh = new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y)));
     const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 4 }); g.rotateY(-Math.PI / 2); g.translate(depth / 2, 0, 0); return g; };
@@ -1450,7 +1463,7 @@ let buildQueue = [];
 function updateChunks(px, pz) {
   const R = Q.radius, gx = cellOf(px), gz = cellOf(pz), want = new Set();
   for (let a = -R; a <= R; a++) for (let b = -R; b <= R; b++) if (a * a + b * b <= R * R + 1) want.add(ckey(gx + a, gz + b));
-  for (const [k, ch] of chunks) if (!want.has(k)) { scene.remove(ch.group); ch.group.traverse(o => { if (o.geometry && !Object.values(G).includes(o.geometry)) o.geometry.dispose(); }); chunks.delete(k); colliders.delete(k); for (let i = players.length - 1; i >= 0; i--) if (players[i].userData.ck === k) players.splice(i, 1); }
+  for (const [k, ch] of chunks) if (!want.has(k)) { scene.remove(ch.group); ch.group.traverse(o => { if (o.geometry && !o.userData.shared && !Object.values(G).includes(o.geometry)) o.geometry.dispose(); }); chunks.delete(k); colliders.delete(k); for (let i = players.length - 1; i >= 0; i--) if (players[i].userData.ck === k) players.splice(i, 1); }
   buildQueue = [];
   for (let a = -R; a <= R; a++) for (let b = -R; b <= R; b++) { const k = ckey(gx + a, gz + b); if (want.has(k) && !chunks.has(k)) buildQueue.push([gx + a, gz + b, a * a + b * b]); }
   buildQueue.sort((p, q) => p[2] - q[2]);
@@ -1600,7 +1613,15 @@ function makeCar(name, color) {
   if (color != null) g.traverse(o => { if (o.isMesh && o.userData.body) { o.material = o.material.clone(); o.material.color.set(color); if (o.material.map && name !== 'police') o.material.map = null; o.material.roughness = 0.35; o.material.metalness = 0.4; } });
   g.userData.cfg = CAR_CFG[name] || CAR_CFG.peugeot405; g.userData.model = name; scene.add(g); return g;
 }
-function placeProp(group, name, x, z, h) { const m = PROPS[name].clone(); m.position.set(x, 0, z); m.rotation.y = h; group.add(m); }
+function placeProp(group, name, x, z, h) { const P = group.userData.props ||= {}; (P[name] ||= []).push([x, z, h]); }
+function flushProps(group) { // une seule InstancedMesh par piece de modele et par quartier (la maison a 16 materiaux : 1 700 dessins -> une centaine)
+  const o = new THREE.Object3D();
+  for (const [name, list] of Object.entries(group.userData.props || {})) PROPS[name].traverse(m => { if (!m.isMesh) return;
+    const im = new THREE.InstancedMesh(m.geometry, m.material, list.length);
+    list.forEach(([x, z, h], i) => { o.position.set(x, 0, z); o.rotation.set(0, h, 0); o.updateMatrix(); im.setMatrixAt(i, o.matrix.multiply(m.matrix)); });
+    im.castShadow = true; im.userData.shared = true; im.computeBoundingSphere(); group.add(im); });
+  delete group.userData.props;
+}
 // gens de Dakar, chat et oiseaux modelises dans Blender (tools/gens_blender.py)
 const GENS_TYPES = { boubou: 3, kaftan: 3, jeune: 3, costume: 1.5, drianke: 3, vendeuse: 2, jeunefemme: 3, bayefall: 0.7, ecolier: 1.5 }, GENS = {}; let catGLB = null, birdGLB = null;
 async function loadAll(progress) {
