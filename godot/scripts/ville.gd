@@ -55,6 +55,7 @@ func model(name: String) -> Dictionary:
 	if models.has(name): return models[name]
 	var scn: Node3D = load("res://models/%s.glb" % name).instantiate(); var list := []; var box := AABB(); var first := true
 	for mi in scn.find_children("*", "MeshInstance3D", true, false):
+		if String(mi.name).contains("Collision") or String(mi.name).contains("Shadow"): continue # formes de collision et d'ombre des modeles Sketchfab (cachees aussi sur le site)
 		var t := _rel(scn, mi); list.append([mi.mesh, t])
 		var bb: AABB = t * mi.get_aabb()
 		box = bb if first else box.merge(bb); first = false
@@ -83,7 +84,7 @@ func flush_models() -> void:
 	for name in placed:
 		var md: Dictionary = model(name)
 		for pi in md.meshes.size():
-			var pair: Array = md.meshes[pi]; var mk := "%s_%d" % [name, pi]
+			var pair: Array = md.meshes[pi]; var rn: String = pair[0].resource_name; var mk := "%s_%s" % [name, rn if rn != "" else str(pi)] # nom de la piece : stable si la liste change
 			if not shared_meshes.has(mk): # un seul maillage par modele, partage par toutes les tuiles
 				var mesh0: Mesh = pair[0].duplicate()
 				for i in mesh0.get_surface_count():

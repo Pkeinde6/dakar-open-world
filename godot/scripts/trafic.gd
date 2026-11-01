@@ -40,6 +40,7 @@ func _visual(name: String, length: float) -> Node3D:
 	var v: Node3D = templates[name].instantiate()
 	var box := AABB(); var first := true
 	for mi in v.find_children("*", "MeshInstance3D", true, false):
+		if String(mi.name).contains("Collision") or String(mi.name).contains("Shadow"): mi.visible = false; continue
 		var bb: AABB = mi.global_transform * mi.get_aabb() if mi.is_inside_tree() else _rel(v, mi) * mi.get_aabb()
 		box = bb if first else box.merge(bb); first = false
 	var k := length / maxf(box.size.x, box.size.z)
