@@ -12,6 +12,35 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
+// ---------------- Relief reel (SRTM, tools/elev.mjs -> elev.js) ----------------
+// La physique reste a plat : ce sont les shaders qui courbent le monde autour du joueur. Chaque sommet monte ou descend
+// de (altitude ou il est - altitude sous le joueur) : on voit le Plateau, les Mamelles, la mer en contrebas, sans rien
+// changer a la conduite, aux ponts ni au trafic. Relief double : la maille SRTM de 250 m lisse les pentes (Mamelles ~45 m au lieu de 105).
+const ELEV_K = 2;
+const ELEVU = { elevMap: { value: null }, elevBox: { value: new THREE.Vector4(0, 0, 0, 0) }, elevRef: { value: 0 }, elevK: { value: 0 } };
+let elevH = null, elevG = null;
+if (window.ELEV) {
+  const E = window.ELEV, bin = atob(E.h), i16 = new Int16Array(E.nx * E.nz);
+  for (let i = 0; i < i16.length; i++) { const lo = bin.charCodeAt(2 * i), hi = bin.charCodeAt(2 * i + 1); i16[i] = (hi << 8 | lo) << 16 >> 16; }
+  elevH = new Float32Array(i16.length); const half = new Uint16Array(i16.length);
+  for (let i = 0; i < i16.length; i++) { elevH[i] = i16[i] / 10; half[i] = THREE.DataUtils.toHalfFloat(elevH[i]); }
+  const t = new THREE.DataTexture(half, E.nx, E.nz, THREE.RedFormat, THREE.HalfFloatType); t.minFilter = t.magFilter = THREE.LinearFilter; t.needsUpdate = true;
+  elevG = E; ELEVU.elevMap.value = t; ELEVU.elevK.value = ELEV_K;
+  ELEVU.elevBox.value.set(E.x0 - E.step / 2, E.z0 - E.step / 2, 1 / (E.nx * E.step), 1 / (E.nz * E.step));
+}
+// altitude (m) sous un point, meme interpolation que la texture
+function elevAt(x, z) {
+  if (!elevH) return 0; const E = elevG, fx = clamp((x - E.x0) / E.step, 0, E.nx - 1.001), fz = clamp((z - E.z0) / E.step, 0, E.nz - 1.001), i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j, k = j * E.nx + i;
+  return (elevH[k] * (1 - u) + elevH[k + 1] * u) * (1 - v) + (elevH[k + E.nx] * (1 - u) + elevH[k + E.nx + 1] * u) * v;
+}
+THREE.ShaderChunk.common += '\nuniform sampler2D elevMap; uniform vec4 elevBox; uniform float elevRef, elevK;\nfloat elevLift(vec2 p) { return elevK * (texture2D(elevMap, (p - elevBox.xy) * elevBox.zw).r - elevRef); }\n';
+THREE.ShaderChunk.project_vertex = THREE.ShaderChunk.project_vertex.replace('mvPosition = modelViewMatrix * mvPosition;',
+  'vec4 elevW = modelMatrix * mvPosition; elevW.y += elevLift(elevW.xz);\nmvPosition = viewMatrix * elevW;');
+THREE.ShaderChunk.worldpos_vertex = THREE.ShaderChunk.worldpos_vertex.replace('worldPosition = modelMatrix * worldPosition;',
+  'worldPosition = modelMatrix * worldPosition;\n\tworldPosition.y += elevLift(worldPosition.xz);');
+const elevPatch = (sh) => Object.assign(sh.uniforms, ELEVU); // les memes objets partout : changer elevRef suffit
+THREE.Material.prototype.onBeforeCompile = elevPatch;
+
 const $ = id => document.getElementById(id);
 const D = window.MAP_DATA;
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -473,7 +502,7 @@ const sideMat = new THREE.MeshStandardMaterial({ map: asphaltTex, vertexColors: 
 // the scanned asphalt is a dark fresh tarmac; Dakar roads are sun-bleached and dusty, so the albedo is lifted (linear > 1)
 for (const [m, f] of [[roadMat, -1.5], [dirtRoadMat, -1.5], [sideMat, -1]]) { m.polygonOffset = true; m.polygonOffsetFactor = f; m.polygonOffsetUnits = f; }
 pbr(roadMat, 'worn_asphalt', { tint: new THREE.Color(2.6, 2.6, 2.65) }); // grey like the Street View tarmac, not brown
-roadMat.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+roadMat.onBeforeCompile = (sh) => { elevPatch(sh); sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
   diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(.3, .55, .15))), diffuseColor.rgb, .25); // the scanned tarmac is brown: keep a hint of it`); }; pbr(dirtRoadMat, 'sand_02', { normal: 0.8, tint: new THREE.Color(1.35, 1.3, 1.25) }); pbr(sideMat, 'interlocking_concrete_pavers', { tint: new THREE.Color(2.2, 2.1, 2.0), repeat: 3 });
 pbr(shopMat, 'painted_metal_shutter', { diff: false, rough: false, normal: 0.4 });
 // sand drift texture: u = across (0 at the curb, 1 toward the lane), v = along the road; ragged inner edge
@@ -490,7 +519,7 @@ const markMat = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.6
 const bldMat = new THREE.MeshStandardMaterial({ map: facadeTex, vertexColors: true, roughness: 0.85, emissiveMap: litTex, emissive: 0xffffff, emissiveIntensity: 0 });
 pbr(bldMat, 'worn_plaster_wall', { diff: false, normal: 0.7 });
 // le sable remonte sur le pied des murs, la pluie et la poussiere laissent des coulures, les toits-terrasses sont en beton brut
-bldMat.onBeforeCompile = (sh) => {
+bldMat.onBeforeCompile = (sh) => { elevPatch(sh);
   sh.vertexShader = 'varying vec3 vWP; varying float vUp;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
     vWP = (modelMatrix * vec4(transformed, 1.)).xyz; vUp = normal.y;`);
   sh.fragmentShader = `varying vec3 vWP; varying float vUp;
@@ -538,7 +567,7 @@ const bougMat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: tr
 // wind: vertex sway above a base height, phase from the instance position so neighbours don't move in lockstep
 const windT = { value: 0 };
 function windy(mat, base, amp) {
-  mat.onBeforeCompile = (sh) => {
+  mat.onBeforeCompile = (sh) => { elevPatch(sh);
     sh.uniforms.uWT = windT;
     sh.vertexShader = 'uniform float uWT;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       vec2 ip = vec2(0.);
@@ -563,13 +592,13 @@ const neemMat = new THREE.MeshStandardMaterial({ map: leafCardTex, alphaTest: 0.
 windy(leafMat, 7.5, 0.06); windy(palmTrunkMat, 3, 0.012); windy(neemMat, -3, 0.035); windy(grassMat, 0, 0.12); windy(bushMat, 0, 0.05);
 
 // ground
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshStandardMaterial({ map: sandTex, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000, 200, 200), /* 40 m entre sommets : le sol suit le relief */ new THREE.MeshStandardMaterial({ map: sandTex, roughness: 1 }));
 ground.geometry.attributes.uv.array.forEach((v, i, a) => a[i] = v * 600);
 pbr(ground.material, 'sand_02', { normal: 0.8 });
 const groundOff = { value: new THREE.Vector2() }; // the 8 km ground plane follows the player (Touba is 170 km away)
 { const gm = ground.material, gravel = { value: null };
   texLoader.load('textures/gravelly_sand_diff.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); gravel.value = t; gm.defines = { GRAVEL: 1 }; gm.needsUpdate = true; });
-  gm.onBeforeCompile = (sh) => {
+  gm.onBeforeCompile = (sh) => { elevPatch(sh);
     sh.uniforms.tGravel = gravel; sh.uniforms.uGOff = groundOff;
     sh.fragmentShader = `uniform sampler2D tGravel; uniform vec2 uGOff;
 float gn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);float a=fract(sin(dot(i,vec2(127.1,311.7)))*43758.5),b=fract(sin(dot(i+vec2(1,0),vec2(127.1,311.7)))*43758.5),c=fract(sin(dot(i+vec2(0,1),vec2(127.1,311.7)))*43758.5),d=fract(sin(dot(i+vec2(1,1),vec2(127.1,311.7)))*43758.5);return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);}
@@ -1326,7 +1355,7 @@ function streetLights(byRoad, cols, lamps) {
 const plazaMat = new THREE.MeshStandardMaterial({ color: 0xd8d0c2, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -0.8, polygonOffsetUnits: -0.8 });
 pbr(plazaMat, 'interlocking_concrete_pavers', { tint: new THREE.Color(2.5, 2.45, 2.35) });
 // the scanned pavers are brick red; Dakar squares and sidewalks are grey-beige concrete: keep only a hint of the red
-const greyPavers = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+const greyPavers = (sh) => { elevPatch(sh); sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
   diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(.3, .55, .15))) * vec3(1.04, 1.0, .93), diffuseColor.rgb, .15);`); };
 plazaMat.onBeforeCompile = greyPavers; sideMat.onBeforeCompile = greyPavers;
 const benchMat = new THREE.MeshStandardMaterial({ color: 0xcfc6b4, roughness: 0.85 });
@@ -1651,7 +1680,7 @@ function houseGeometry(root) {
   g.translate(-c.x, -b.min.y, -c.z); g.computeBoundingBox(); g.computeBoundingSphere(); g.userData.size = g.boundingBox.getSize(new THREE.Vector3()); return g;
 }
 const houseMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
-houseMat.onBeforeCompile = (sh) => {
+houseMat.onBeforeCompile = (sh) => { elevPatch(sh);
   sh.vertexShader = 'attribute float facade;\n' + sh.vertexShader.replace('#include <color_vertex>', `
     vColor = vec3(1.0);
     vColor *= color.xyz;
@@ -2477,6 +2506,7 @@ function loop() {
   { const T = 8000 / 600 * 30, gx = Math.round(player.x / T) * T, gz = Math.round(player.z / T) * T; // whole texture tiles, so the sand never slides
     if (gx !== ground.position.x || gz !== ground.position.z) { ground.position.set(gx, 0, gz); groundOff.value.set(gx * 600 / 8000, -gz * 600 / 8000); } }
   sky.position.copy(camera.position);
+  ELEVU.elevRef.value = elevAt(player.x, player.z); ELEVU.elevK.value = elevH && !g3d.on ? ELEV_K : 0; // Google 3D a deja son relief
   glowMat.opacity = night ? 0.8 : 0;
   grade.uniforms.t.value = time; windT.value = time;
   for (const pl of players) { const ph = pl.userData.ph; if (pl.userData.ball) { pl.position.x = Math.sin(time * .9 + ph) * 7; pl.position.z = Math.sin(time * .53 + ph) * 13; pl.position.y = 0.15 + Math.abs(Math.sin(time * 4 + ph)) * 0.6; } else { pl.position.x += Math.sin(time * .7 + ph) * 0.03; pl.position.z += Math.cos(time * .45 + ph * 2) * 0.05; pl.position.y = Math.abs(Math.sin(time * 9 + ph)) * 0.08; } }
@@ -2771,7 +2801,7 @@ function skipTravel() { // fast-forward a long regional trip
   if (lieu.length === 2 && lieu.every(Number.isFinite)) spawnAt(...ll(lieu[0], lieu[1]));
   else spawnAt(CITIES[1].p[0], CITIES[1].p[1]);
   if (url.has('cap')) player.h = THREE.MathUtils.degToRad(+url.get('cap'));
-  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, stations: STATIONS_OSM, get chunks() { return chunks; } };
+  window.DOW = { player, spawnAt, ll, vue: (h, b = 0) => { skyCam = h ? [h, b] : null; }, MODELS, PROPS, scene, camera, renderer, keys, stations: STATIONS_OSM, elevAt, get chunks() { return chunks; } };
   $('loadtxt').textContent = 'Prêt. Bienvenue à Dakar.';
   $('menubtns').style.display = 'flex'; $('start').focus();
   const go = () => { if ($('loading').style.display === 'none') return; $('loading').style.display = 'none'; document.body.classList.add('playing'); initAudio(); chapterCard();

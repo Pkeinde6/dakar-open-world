@@ -4,7 +4,7 @@
 const CACHE = 'dow-1';
 // une recherche qui ignore ?v=… parcourt tout le cache : seulement pour les adresses versionnees
 const find = (c, req) => c.match(req).then(hit => hit || (new URL(req.url).search ? c.match(req, { ignoreSearch: true }) : undefined));
-const CORE = ['./', 'index.html', 'game.js', 'data.js', 'bridges.js', 'lieux.js', 'services.js', 'manifest.webmanifest', 'textures/menu.jpg', 'icones/icone-180.png'];
+const CORE = ['./', 'index.html', 'game.js', 'data.js', 'bridges.js', 'lieux.js', 'services.js', 'elev.js', 'manifest.webmanifest', 'textures/menu.jpg', 'icones/icone-180.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
