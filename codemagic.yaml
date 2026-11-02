@@ -100,10 +100,10 @@ workflows:
           node tools/app_www.mjs
       - name: Projet iOS Capacitor
         script: |
-          npx cap init "Dakar Open World" "$BUNDLE_ID" --web-dir www
+          npx cap init "Teranga" "$BUNDLE_ID" --web-dir www
           npx cap add ios
           # icone 1024 px, appli a l'horizontale et plein ecran, pas de chiffrement a declarer
-          cp godot/icone.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+          cp icones/teranga-1024.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
           plist=ios/App/App/Info.plist
           for k in UISupportedInterfaceOrientations "UISupportedInterfaceOrientations~ipad"; do
             /usr/libexec/PlistBuddy -c "Delete :$k" $plist || true
@@ -114,7 +114,7 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :UIRequiresFullScreen bool true" $plist || true
           /usr/libexec/PlistBuddy -c "Add :UIStatusBarHidden bool true" $plist || true
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" $plist || true
-          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Dakar" $plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Dakar" $plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Teranga" $plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Teranga" $plist
           sed -i '' "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = $VERSION;/; s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $BUILD_NUMBER;/" ios/App/App.xcodeproj/project.pbxproj
           npx cap sync ios
       - name: Profils de signature

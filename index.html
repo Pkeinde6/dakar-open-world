@@ -7,12 +7,12 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Dakar">
+<meta name="apple-mobile-web-app-title" content="Teranga">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icones/icone-180.png">
-<title>Dakar Open World</title>
+<title>Teranga</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;600&family=Sora:wght@600&display=swap" rel="stylesheet">
 <style>
   :root{--hud:#fff;--accent:#f2c230;--wd:#c8f7ff}
   html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:Inter,system-ui,sans-serif;color:#fff;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
@@ -69,7 +69,8 @@
   #loading:before,#pause:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(5,7,10,.92) 0%,rgba(5,7,10,.6) 45%,rgba(5,7,10,.05) 100%)}
   .menu{position:relative;max-width:780px}
   .kicker{font:600 13px Inter;letter-spacing:3px;text-transform:uppercase;color:var(--accent)}
-  #loading h1{font:700 clamp(40px,7vw,76px) Oswald;white-space:nowrap;margin:6px 0 0;letter-spacing:3px;line-height:1;background:linear-gradient(90deg,#00853f,#fdef42,#e31b23);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #loading h1{font:600 clamp(48px,8vw,92px) Sora,Inter,sans-serif;white-space:nowrap;margin:8px 0 0;letter-spacing:-.03em;line-height:1;display:flex;align-items:center;gap:.3em;color:#fff}
+  #loading h1 .symb{width:1.25em;height:1.25em;flex:none}
   #loading p{margin:10px 0 18px;opacity:.8;line-height:1.5}
   #prog{width:min(520px,80vw);height:4px;background:rgba(255,255,255,.15)}#prog i{display:block;height:100%;width:0;background:#fff;transition:width .2s}
   #menubtns,#pausebtns{display:none;flex-direction:column;align-items:flex-start;gap:14px;margin-top:22px}
@@ -157,8 +158,8 @@
 
 <div id="loading">
   <div class="menu">
-    <div class="kicker">Les vraies rues de Dakar · OpenStreetMap</div>
-    <h1>DAKAR OPEN WORLD</h1>
+    <div class="kicker">Les vraies rues de Dakar, Diourbel et Touba</div>
+    <h1 aria-label="Teranga"><svg class="symb" viewBox="0 0 96 96" aria-hidden="true"><g fill="#FFD23F"><path d="M48.00 6.00 L50.69 14.29 L59.41 14.29 L52.36 19.42 L55.05 27.71 L48.00 22.58 L40.95 27.71 L43.64 19.42 L36.59 14.29 L45.31 14.29 Z"/><path fill-rule="evenodd" d="M16 40 H80 A4 4 0 0 1 80 48 H53.5 L70 88 H26 L42.5 48 H16 A4 4 0 0 1 16 40 Z M47.1 55 h1.8 l0.4 7 h-2.6 Z M46.4 66 h3.2 l0.6 8 h-4.4 Z M45.6 78 h4.8 l0.7 7 h-6.2 Z"/></g></svg><span>teranga</span></h1>
     <p id="loadtxt">Chargement de la carte réelle (OpenStreetMap)…</p>
     <div id="prog"><i></i></div>
     <div id="menubtns">
@@ -172,7 +173,7 @@
 
 <div id="pause">
   <div class="menu">
-    <div class="kicker">Dakar Open World</div>
+    <div class="kicker">Teranga</div>
     <h2>PAUSE</h2>
     <div id="pausebtns">
       <button class="primary" id="resume">REPRENDRE</button>
@@ -225,6 +226,6 @@
   "3d-tiles-renderer": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.39/src/index.js"
 } }
 </script>
-<script type="module" src="game.js?v=72"></script>
+<script type="module" src="game.js?v=73"></script>
 </body>
 </html>
