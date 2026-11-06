@@ -1,3 +1,10 @@
+/*!
+ * Teranga / Dakar Open World — (c) 2026 pkeinde6. Tous droits reserves.
+ * Toute reproduction, et toute utilisation pour entrainer, affiner ou alimenter un systeme d'intelligence
+ * artificielle (fouille de textes et de donnees), est interdite sans accord ecrit : opposition expresse au sens
+ * de l'article 4 de la directive (UE) 2019/790 et de l'article L.122-5-3 du Code de la propriete intellectuelle.
+ * Les donnees cartographiques viennent d'OpenStreetMap (c) ses contributeurs, licence ODbL.
+ */
 // Mode hors ligne de Dakar Open World : tout ce que le jeu charge est garde sur l'appareil (Cache Storage).
 // Le code et les donnees du jeu passent d'abord par le reseau (pour recevoir les mises a jour) puis par le cache
 // quand il n'y a pas de reseau ; modeles, textures, bibliotheques et batiments sont servis directement du cache.

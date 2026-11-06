@@ -1,0 +1,10 @@
+# Teranga / Dakar Open World — (c) 2026 pkeinde6. Tous droits reserves.
+# Spawning ai.txt : aucune utilisation pour l'IA autorisee.
+User-Agent: *
+Disallow: /
+Disallow: *.js
+Disallow: *.html
+Disallow: *.glb
+Disallow: *.jpg
+Disallow: *.png
+Disallow: *.hdr
